@@ -3,22 +3,32 @@ Simple header-only utility library to read numeric data from text (TSV, CSV, etc
 files in C/C++ with error checking. File format should be known at compile time.
 
 ### Main motivation
-The main motivation for this library is that if using the C stdio / C++ iostream functions to read
-numeric data from text files, certain format errors will be silently ignored or lead to undefined behavior.
-Depending on the exact usage, this can include missing values, overflows and underflows, or reading negative
-values when expecting a signed integer, which will not be reported by the corresponding library functions.
-Specifically, a '-' sign is even accepted by [strtoul()](http://en.cppreference.com/w/c/string/byte/strtoul)
-without reporting an error. This requires cumbersome error checking or can lead to cases when a trivial input
-format error results in errors or incorrect results much later which are hard to detect and trace back to
-their origin.
+The main motivation for this library is to simplify the common task of reading numeric data from text files.
+IMO, the C stdio / C++ iostream functions have a shortcoming that certain format errors are hard to detect,
+and "simple" usage (e.g. fscanf(file,"%d %u %g\n",&i,&u,&d)) can result in errors silently ignored or undefined
+behavior. Depending on the exact usage, this can include missing values, overflows and underflows, or reading
+negative values when expecting a signed integer. Specifically, a '-' sign is even accepted by
+[strtoul()](http://en.cppreference.com/w/c/string/byte/strtoul) without reporting an error. Furthermore, the
+[scanf()](http://en.cppreference.com/w/c/io/fscanf) function will always skip ANY whitespace before any numeric
+conversion, including newline characters. This requires cumbersome error checking or parsing (e.g. to ensure
+that each line contains the right number of values or that no negative number is accidentally present in a field
+expected to be unsigned). Even with efforts to check for errors, it can lead to cases when a trivial input format
+error results in errors or incorrect results much later which are hard to detect and trace back to their origin.
 
 The goal of this library is to provide a simple and robust way to read numeric data from text files in C and
 C++ when the format is known at compile time. This should mean:
 - simple: reading data from a text file should not be longer than a few lines including error checking
 - robust: all format errors should be detected and reported (e.g. missing values, incorrect format, values out of range, etc.)
 
+In line with this, the functionality is limited to this main use case. It supports:
+- reading numbers separated by spaces, tabs, or a given separator character
+- parsing / converting 16, 32 and 64-bit signed and unsigned integers and doubles
+- skipping over any value (including strings, but NOT supporting quotation, escapes, etc.)
+- strictly checking that each line contains the right amount of fields
+- reporting error if there is an overflow or format error or the value is outside a desired range
 
-### Usage:
+
+### Usage
 There are two versions, both are header-only, so including the header in any file that needs it is sufficient.
 The difference is the following:
 
