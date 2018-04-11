@@ -615,7 +615,7 @@ static const char* read_table_get_line_str(const read_table* r) {
 #include <utility>
 
 template<class T>
-int read_table_next(read_table* r, T& val) {
+static int read_table_next(read_table* r, T& val) {
 	 /* not implemented generally, set error to indicate that an
 	  * unsupported conversion was attempted */
 	if(r) r->last_error = T_TYPE;
@@ -662,7 +662,7 @@ struct read_bounds_t {
 	T min;
 	T max;
 };
-template<class T> read_bounds_t<T> read_bounds(T& val_, T min_, T max_) {
+template<class T> static read_bounds_t<T> read_bounds(T& val_, T min_, T max_) {
 	return read_bounds_t<T>(val_,min_,max_);
 }
 /* shortcut to read coordinate pairs in the "obvious" format, i.e. the first
@@ -671,7 +671,7 @@ template<class T> read_bounds_t<T> read_bounds(T& val_, T min_, T max_) {
  * -- note: this is the format that is obvious to me, different use cases
  * might have the coordinates in different order or the range of longitudes
  * could be 0 to 360 or even unbounded */
-read_bounds_t<std::pair<double,double> > read_bounds_coords(std::pair<double,double>& coords) {
+static read_bounds_t<std::pair<double,double> > read_bounds_coords(std::pair<double,double>& coords) {
 	return read_bounds_t<std::pair<double,double> >(coords,
 		std::make_pair(-180.0,-90.0),std::make_pair(180.0,90.0));
 }
@@ -681,7 +681,7 @@ read_bounds_t<std::pair<double,double> > read_bounds_coords(std::pair<double,dou
 uint32_t x;
 read_table_next(r,read_bounds(&x,1000U,2000U));
 */
-template<class T> int read_table_next(read_table* r, read_bounds_t<T> b) {
+template<class T> static int read_table_next(read_table* r, read_bounds_t<T> b) {
 	if(r) r->last_error = T_TYPE;
 	return 1;
 }
@@ -718,9 +718,9 @@ template<> int read_table_next(read_table* r, read_bounds_t<std::pair<double,dou
 /* recursive templated function to convert whole line using one function call only
  * note: recursion will be probably eliminated and the whole function expanded to
  * the actual sequence of conversions needed */
-int read_table_multiple(read_table* r) { return 0; }
+static int read_table_multiple(read_table* r) { return 0; }
 template<class first, class ...rest>
-int read_table_multiple(read_table* r, first&& val, rest&&... vals) {
+static int read_table_multiple(read_table* r, first&& val, rest&&... vals) {
 	if(read_table_next(r,val)) return 1;
 	return read_table_multiple(r,vals...);
 }
