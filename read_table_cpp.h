@@ -180,7 +180,10 @@ struct read_table2 {
 		/* constructor taking a reference to a stream -- it is NOT copied, i.e.
 		 * the original instance of the stream need to be kept by the caller;
 		 * also, the stream is not closed in the destructor in this case */
-		read_table2(std::istream& is_) : is(&is_),fs(0) { read_table_init(); }
+		read_table2(std::istream& is_);
+		/* constructor either opening a file or taking the stream as fallback
+		 * when fn_ is NULL */
+		read_table2(const char* fn_, std::istream& is_);
 		read_table2(read_table2&& r);
 		~read_table2();
 		
@@ -289,6 +292,30 @@ read_table2::read_table2(const char* fn_) {
 	if( !fs || !(fs->is_open()) || fs->fail() ) last_error = T_ERROR_FOPEN;
 	else fs->exceptions(std::ios_base::goodbit); /* clear exception mask -- no exceptions thrown, error checking done separately */
 	is = fs;
+	read_table_init();
+	fn = fn_;
+}
+
+read_table2::read_table2(const char* fn_, std::istream& is_) {
+	if(fn_) {
+		fs = new std::ifstream(fn_);
+			if( !fs || !(fs->is_open()) || fs->fail() ) last_error = T_ERROR_FOPEN;
+		else fs->exceptions(std::ios_base::goodbit); /* clear exception mask -- no exceptions thrown, error checking done separately */
+		is = fs;
+	}
+	else {
+		fs = 0;
+		is = &is_;
+		is->exceptions(std::ios_base::goodbit); /* clear exception mask -- no exceptions thrown, error checking done separately */
+	}
+	read_table_init();
+	fn = fn_;
+}
+
+read_table2::read_table2(std::istream& is_) {
+	is = &is_;
+	fs = 0;
+	is->exceptions(std::ios_base::goodbit); /* clear exception mask -- no exceptions thrown, error checking done separately */
 	read_table_init();
 }
 

@@ -229,6 +229,7 @@ static int read_table_line_skip(read_table* r, int skip) {
 	if(!r) return 1;
 	if(r->last_error == T_EOF || r->last_error == T_COPIED ||
 		r->last_error == T_ERROR_FOPEN) return 1;
+	if(!(r->f)) { r->last_error = T_READ_ERROR; return 1; }
 	while(1) {
 		ssize_t len = getline(&(r->buf),&(r->buf_size),r->f);
 		if(len < 0) {
@@ -514,7 +515,7 @@ static int read_table_double(read_table* r, double* d) {
 	*d = strtod(r->buf + r->pos, &c2);
 	/* advance position after the number, check if there is proper field separator */
 	if(read_table_post_check(r,c2)) return 1;
-	if(r->flags & READ_TABLE_ALLOW_NAN_INF == 0) {
+	if( (r->flags & READ_TABLE_ALLOW_NAN_INF) == 0) {
 		if(_isnan(*d) || _isinf(*d)) {
 			r->last_error = T_NAN;
 			return 1;
@@ -747,6 +748,22 @@ struct read_table2 : public read_table {
 			else flags |= READ_TABLE_CLOSE_FILE;
 			fn = fn_;
 		}
+		/* same as previous, but the optional FILE* argument is used if fn_ == 0
+		 * (this allows initializing either by opening a file or from an existing
+		 * open file easily) */
+		read_table2(const char* fn_, FILE* f_) {
+			if(!fn_) read_table_init(this,f_);
+			else {
+				FILE* f_ = fopen(fn_,"r");
+				read_table_init(this,f_);
+				/* note: if the file cannot be opened, no exception is thrown,
+				 * any read will fail and the error is set to indicate this */
+				if(!f_) last_error = T_ERROR_FOPEN;
+				else flags |= READ_TABLE_CLOSE_FILE;
+				fn = fn_;
+			}
+		}
+		
 		/* copy constructor: it is safe to copy everything, except the buffer
 		 * which will be allocated; note that only one of the instances
 		 * should be used, so copying invalidates the original */
