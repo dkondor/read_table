@@ -167,17 +167,22 @@ read_bounds_t<std::pair<double,double> > read_bounds_coords(std::pair<double,dou
 		std::make_pair(-180.0,-90.0),std::make_pair(180.0,90.0));
 }
 
+struct line_parser_params {
+	int base; /* base for integer conversions */
+	char delim; /* delimiter to use; 0 means any blank (space or tab) note: cannot be newline */
+	char comment; /* character to indicate comments; 0 means none */
+	bool allow_nan_inf; /* further flags: whether reading a NaN or INF for double values is considered and error */
+	line_parser_params():base(10),delim(0),comment(0),allow_nan_inf(true) { }
+	line_parser_params& set_base(int base_) { base = base_; return *this; }
+	line_parser_params& set_delim(char delim_) { delim = delim_; return *this; }
+	line_parser_params& set_comment(char comment_) { comment = comment_; return *this; }
+	line_parser_params& set_allow_nan_inf(bool allow_nan_inf_) { allow_nan_inf = allow_nan_inf_; return *this; }
+};
 
-
-/* main class containing main parameters for processing text */
-struct read_table2 {
+/* "helper" class doing most of the work for parsing only one line */
+struct line_parser {
 	protected:
-		std::istream* is; /* input stream -- note: only a pointer is stored, the caller either supplies an input stream or a
-			file name; in the former case, the original object should not go out of scope while this struct is used */
-		std::ifstream* fs; /* file stream if it is opened by us */
 		std::string buf; /* buffer to hold the current line */
-		const char* fn; /* file name, stored optionally for error output */
-		uint64_t line; /* current line (count starts from 1) */
 		size_t pos; /* current position in line */
 		size_t col; /* current field (column) */
 		int base; /* base for integer conversions */
@@ -185,41 +190,50 @@ struct read_table2 {
 		char delim; /* delimiter to use; 0 means any blank (space or tab) note: cannot be newline */
 		char comment; /* character to indicate comments; 0 means none */
 		bool allow_nan_inf; /* further flags: whether reading a NaN or INF for double values is considered and error */
-		read_table2() = delete; /* user should supply either an input stream or a filename to use */
-		read_table2(const read_table2& r) = delete; /* disallow copying, only moving is possible */
-		/* helper function for the constructors to set default values */
-		void read_table_init();
+		
+		void line_parser_init(line_parser_params par) {
+			pos = 0;
+			col = 0;
+			base = par.base;
+			delim = par.delim;
+			comment = par.comment;
+			allow_nan_inf = par.allow_nan_inf;
+			last_error = T_OK;
+		}
+		
 	public:
+		/* 1. constructors, either with an empty string, or anything that can be copied into a string */
+		explicit line_parser(line_parser_params par = line_parser_params()) {
+			line_parser_init(par);
+		}
+		template<class... Args>
+		explicit line_parser(line_parser_params par, Args&&... args):buf(std::forward<Args>(args)...) {
+			line_parser_init(par);
+		}
+		template<class... Args>
+		explicit line_parser(Args&&... args):buf(std::forward<Args>(args)...) {
+			line_parser_init(line_parser_params());
+		}
 		
-		/* 1. constructors -- need to give a file name or an already open input stream */
-		
-		/* constructor taking a file name; the given file is opened for reading
-		 * and closed later in the destructor */
-		read_table2(const char* fn_);
-		/* constructor taking a reference to a stream -- it is NOT copied, i.e.
-		 * the original instance of the stream need to be kept by the caller;
-		 * also, the stream is not closed in the destructor in this case */
-		read_table2(std::istream& is_);
-		/* constructor either opening a file or taking the stream as fallback
-		 * when fn_ is NULL */
-		read_table2(const char* fn_, std::istream& is_);
-		read_table2(read_table2&& r);
-		~read_table2();
-		
-		
-		/* 2. read one line into the internal buffer
-		 * 	the 'skip' parameter controls whether empty lines are skipped */
-		bool read_line(bool skip = true);
-		
+		/* 2. set (copy) the internal string */
+		template<class... Args>
+		void set_line(Args&&... args) {
+			buf = std::string(std::forward<Args>(args)...);
+			col = 0;
+			pos = 0;
+			last_error = T_OK;
+		}
+		/* get current line string */
+		const char* get_line_c_str() const { return buf.c_str(); }
+		const std::string& get_line_str() const { return buf; }
 		
 		/* 3. main interface for parsing data; this uses templates and has 
 		 * specializations for all data types supported:
 		 * 16, 32 and 64-bit signed and unsigned integers, doubles,
-		 * pairs of doubles and special "types":
+		 * strings, pairs of doubles and special "types":
 		 * 	- read_table_skip_t for skipping values
 		 * 	- read_bounds_t for specifying minimum and maximum value for the input
 		 * see below for more explanation */
-		
 		/* try to parse one value from the currently read line */
 		template<class T> bool read_next(T& val);
 		/* overload of the previous for reading values with bounds */
@@ -245,18 +259,8 @@ struct read_table2 {
 		enum read_table_errors get_last_error() const { return last_error; }
 		const char* get_last_error_str() const { return get_error_desc(last_error); }
 		
-		/* get current position in the file */
-		uint64_t get_line() const { return line; }
 		size_t get_pos() const { return pos; }
 		size_t get_col() const { return col; }
-		/* set filename (for better formatting of diagnostic messages) */
-		void set_fn_for_diag(const char* fn_) { fn = fn; }
-		/* get current line string */
-		const char* get_line_c_str() const { return buf.c_str(); }
-		const std::string& get_line_str() const { return buf; }
-		
-		/* write formatted error message to the given stream */
-		void write_error(std::ostream& f) const;
 		
 		
 		/* 5. non-templated functions for reading specific data types and values */
@@ -301,31 +305,70 @@ struct read_table2 {
 };
 
 
+/* main class containing main parameters for processing text */
+struct read_table2 : public line_parser {
+	protected:
+		std::istream* is; /* input stream -- note: only a pointer is stored, the caller either supplies an input stream or a
+			file name; in the former case, the original object should not go out of scope while this struct is used */
+		std::ifstream* fs; /* file stream if it is opened by us */
+		const char* fn; /* file name, stored optionally for error output */
+		uint64_t line; /* current line (count starts from 1) */
+		read_table2() = delete; /* user should supply either an input stream or a filename to use */
+		read_table2(const read_table2& r) = delete; /* disallow copying, only moving is possible */
+		/* helper function for the constructors to set default values */
+		void read_table_init(line_parser_params par);
+	public:
+		
+		/* 1. constructors -- need to give a file name or an already open input stream */
+		
+		/* constructor taking a file name; the given file is opened for reading
+		 * and closed later in the destructor */
+		explicit read_table2(const char* fn_, line_parser_params par = line_parser_params());
+		/* constructor taking a reference to a stream -- it is NOT copied, i.e.
+		 * the original instance of the stream need to be kept by the caller;
+		 * also, the stream is not closed in the destructor in this case */
+		explicit read_table2(std::istream& is_, line_parser_params par = line_parser_params());
+		/* constructor either opening a file or taking the stream as fallback
+		 * when fn_ is NULL */
+		read_table2(const char* fn_, std::istream& is_, line_parser_params par = line_parser_params());
+		read_table2(read_table2&& r);
+		~read_table2();
+		
+		
+		/* 2. read one line into the internal buffer
+		 * 	the 'skip' parameter controls whether empty lines are skipped */
+		bool read_line(bool skip = true);
+		
+		
+		/* get current position in the file */
+		uint64_t get_line() const { return line; }
+		/* set filename (for better formatting of diagnostic messages) */
+		void set_fn_for_diag(const char* fn_) { fn = fn; }
+		
+		/* write formatted error message to the given stream */
+		void write_error(std::ostream& f) const;
+};
+
+
 
 
 /* constructor -- allocate new read_table2 struct, fill in the necessary fields */
-void read_table2::read_table_init() {
+void read_table2::read_table_init(line_parser_params par) {
+	line_parser_init(par);
 	line = 0;
-	pos = 0;
-	col = 0;
-	last_error = T_OK;
-	delim = 0;
-	comment = 0;
 	fn = 0;
-	base = 10;
-	allow_nan_inf = true;
 }
 
-read_table2::read_table2(const char* fn_) {
+read_table2::read_table2(const char* fn_, line_parser_params par) {
 	fs = new std::ifstream(fn_);
 	if( !fs || !(fs->is_open()) || fs->fail() ) last_error = T_ERROR_FOPEN;
 	else fs->exceptions(std::ios_base::goodbit); /* clear exception mask -- no exceptions thrown, error checking done separately */
 	is = fs;
-	read_table_init();
+	read_table_init(par);
 	fn = fn_;
 }
 
-read_table2::read_table2(const char* fn_, std::istream& is_) {
+read_table2::read_table2(const char* fn_, std::istream& is_, line_parser_params par) {
 	if(fn_) {
 		fs = new std::ifstream(fn_);
 			if( !fs || !(fs->is_open()) || fs->fail() ) last_error = T_ERROR_FOPEN;
@@ -337,15 +380,15 @@ read_table2::read_table2(const char* fn_, std::istream& is_) {
 		is = &is_;
 		is->exceptions(std::ios_base::goodbit); /* clear exception mask -- no exceptions thrown, error checking done separately */
 	}
-	read_table_init();
+	read_table_init(par);
 	fn = fn_;
 }
 
-read_table2::read_table2(std::istream& is_) {
+read_table2::read_table2(std::istream& is_, line_parser_params par) {
 	is = &is_;
 	fs = 0;
 	is->exceptions(std::ios_base::goodbit); /* clear exception mask -- no exceptions thrown, error checking done separately */
-	read_table_init();
+	read_table_init(par);
 }
 
 /* destructor -- closes the input stream only if it was opened in the 
@@ -356,7 +399,7 @@ read_table2::~read_table2() {
 
 /* move constructor -- moves the stream to the new instance
  * the old instance is invalidated */
-read_table2::read_table2(read_table2&& r) {
+read_table2::read_table2(read_table2&& r):line_parser(std::move(r.buf)) {
 	/* copy all elements */
 	line = r.line;
 	pos = r.pos;
@@ -405,7 +448,7 @@ bool read_table2::read_line(bool skip) {
 }
 
 /* checks to be performed before trying to convert a field */
-bool read_table2::read_table_pre_check() {
+bool line_parser::read_table_pre_check() {
 	if(last_error == T_EOF || last_error == T_EOL ||
 		last_error == T_READ_ERROR || last_error == T_ERROR_FOPEN) return false;
 	/* 1. skip any blanks */
@@ -426,7 +469,7 @@ bool read_table2::read_table_pre_check() {
 }
 
 /* perform checks needed after number conversion */
-bool read_table2::read_table_post_check(const char* c2) {
+bool line_parser::read_table_post_check(const char* c2) {
 	/* 0. check for format errors and overflow as indicated by strto* */
 	if(errno == EINVAL || c2 == buf.c_str() + pos) {
 		last_error = T_FORMAT;
@@ -470,7 +513,7 @@ bool read_table2::read_table_post_check(const char* c2) {
  * 	then one more position
  * if no delimiter, this means skipping any blanks, than any nonblanks and
  * 	ending at the next blank */
-bool read_table2::read_skip() {
+bool line_parser::read_skip() {
 	size_t len = buf.size();
 	if(delim) {
 		/* if there is a delimiter, just advance until after the next one */
@@ -502,7 +545,7 @@ bool read_table2::read_skip() {
 
 
 /* return the string value in the next field -- internal helper */
-bool read_table2::read_string2(std::pair<size_t,size_t>& pos1) {
+bool line_parser::read_string2(std::pair<size_t,size_t>& pos1) {
 	size_t len = buf.size();
 	if(delim) {
 		if(last_error == T_EOF || last_error == T_EOL ||
@@ -532,7 +575,7 @@ bool read_table2::read_string2(std::pair<size_t,size_t>& pos1) {
 #if __cplusplus >= 201703L
 /* return the string value in the next field as a string_view
  * NOTE: it will be invalidated when a new line is read */
-bool read_table2::read_string_view(std::string_view& str) {
+bool line_parser::read_string_view(std::string_view& str) {
 	std::pair<size_t,size_t> pos1;
 	if(!read_string2(pos1)) return false;
 	str = std::string_view(buf.data() + pos1.first, pos1.second);
@@ -541,7 +584,7 @@ bool read_table2::read_string_view(std::string_view& str) {
 #endif
 /* same but using a custom class instead of relying on the C++17
  * std::string_view */
-bool read_table2::read_string_view_custom(string_view_custom& str) {
+bool line_parser::read_string_view_custom(string_view_custom& str) {
 	std::pair<size_t,size_t> pos1;
 	if(!read_string2(pos1)) return false;
 	str.str = buf.data() + pos1.first;
@@ -550,7 +593,7 @@ bool read_table2::read_string_view_custom(string_view_custom& str) {
 }
 
 /* return the string value in the next field as a copy */
-bool read_table2::read_string(std::string& str) {
+bool line_parser::read_string(std::string& str) {
 	std::pair<size_t,size_t> pos1;
 	if(!read_string2(pos1)) return false;
 	str.assign(buf,pos1.first,pos1.second);
@@ -562,7 +605,7 @@ bool read_table2::read_string(std::string& str) {
  * check explicitely that it is within the limits provided
  * (note: the limits are inclusive, so either min or max is OK)
  * return true on success, false on error */
-bool read_table2::read_int32_limits(int32_t& i, int32_t min, int32_t max) {
+bool line_parser::read_int32_limits(int32_t& i, int32_t min, int32_t max) {
 	if(!read_table_pre_check()) return false;
 	errno = 0;
 	char* c2;
@@ -581,7 +624,7 @@ bool read_table2::read_int32_limits(int32_t& i, int32_t min, int32_t max) {
 
 /* try to convert the next value to 64-bit integer
  * return true on success, false on error */
-bool read_table2::read_int64_limits(int64_t& i, int64_t min, int64_t max) {
+bool line_parser::read_int64_limits(int64_t& i, int64_t min, int64_t max) {
 	if(!read_table_pre_check()) return false;
 	errno = 0;
 	char* c2;
@@ -614,7 +657,7 @@ bool read_table2::read_int64_limits(int64_t& i, int64_t min, int64_t max) {
 
 /* try to convert the next value to 32-bit unsigned integer
  * return true on success, false on error */
-bool read_table2::read_uint32_limits(uint32_t& i, uint32_t min, uint32_t max) {
+bool line_parser::read_uint32_limits(uint32_t& i, uint32_t min, uint32_t max) {
 	if(!read_table_pre_check()) return false;
 	errno = 0;
 	char* c2;
@@ -641,7 +684,7 @@ bool read_table2::read_uint32_limits(uint32_t& i, uint32_t min, uint32_t max) {
 
 /* try to convert the next value to 64-bit unsigned integer
  * return true on success, false on error */
-bool read_table2::read_uint64_limits(uint64_t& i, uint64_t min, uint64_t max) {
+bool line_parser::read_uint64_limits(uint64_t& i, uint64_t min, uint64_t max) {
 	if(!read_table_pre_check()) return false;
 	errno = 0;
 	char* c2;
@@ -685,7 +728,7 @@ bool read_table2::read_uint64_limits(uint64_t& i, uint64_t min, uint64_t max) {
  * return true on success, false on error
  * note: this uses the previous functions as there is no separate library
  * function for 16-bit integers anyway */
-bool read_table2::read_int16_limits(int16_t& i, int16_t min, int16_t max) {
+bool line_parser::read_int16_limits(int16_t& i, int16_t min, int16_t max) {
 	/* just use the previous function and check for overflow */
 	int32_t i2;
 	/* note: the following function already check for overflow as well */
@@ -696,7 +739,7 @@ bool read_table2::read_int16_limits(int16_t& i, int16_t min, int16_t max) {
 
 /* try to convert the next value to a 16-bit unsigned integer
  * return true on success, false on error */
-bool read_table2::read_uint16_limits(uint16_t& i, uint16_t min, uint16_t max) {
+bool line_parser::read_uint16_limits(uint16_t& i, uint16_t min, uint16_t max) {
 	/* just use the previous function and check for overflow */
 	uint32_t i2;
 	bool ret = !read_uint32_limits(i2,(uint32_t)min,(uint32_t)max);
@@ -706,7 +749,7 @@ bool read_table2::read_uint16_limits(uint16_t& i, uint16_t min, uint16_t max) {
 
 /* try to convert the next value to a double precision float value
  * return true on success, false on error */
-bool read_table2::read_double(double& d) {
+bool line_parser::read_double(double& d) {
 	if(!read_table_pre_check()) return false;
 	errno = 0;
 	char* c2;
@@ -721,7 +764,7 @@ bool read_table2::read_double(double& d) {
 	}
 	return true;
 }
-bool read_table2::read_double_limits(double& d, double min, double max) {
+bool line_parser::read_double_limits(double& d, double min, double max) {
 	if(!read_table_pre_check()) return false;
 	errno = 0;
 	char* c2;
@@ -758,59 +801,59 @@ void read_table2::write_error(std::ostream& f) const {
 
 
 /* template specializations to use the same function name */
-template<> bool read_table2::read_next(int32_t& val) { return read_int32(val); }
-template<> bool read_table2::read_next(uint32_t& val) { return read_uint32(val); }
-template<> bool read_table2::read_next(int16_t& val) { return read_int16(val); }
-template<> bool read_table2::read_next(uint16_t& val) { return read_uint16(val); }
-template<> bool read_table2::read_next(int64_t& val) { return read_int64(val); }
-template<> bool read_table2::read_next(uint64_t& val) { return read_uint64(val); }
-template<> bool read_table2::read_next(double& val) { return read_double(val); }
-template<> bool read_table2::read_next(std::pair<double,double>& p) {
+template<> bool line_parser::read_next(int32_t& val) { return read_int32(val); }
+template<> bool line_parser::read_next(uint32_t& val) { return read_uint32(val); }
+template<> bool line_parser::read_next(int16_t& val) { return read_int16(val); }
+template<> bool line_parser::read_next(uint16_t& val) { return read_uint16(val); }
+template<> bool line_parser::read_next(int64_t& val) { return read_int64(val); }
+template<> bool line_parser::read_next(uint64_t& val) { return read_uint64(val); }
+template<> bool line_parser::read_next(double& val) { return read_double(val); }
+template<> bool line_parser::read_next(std::pair<double,double>& p) {
 	double x,y;
 	if( !( read_double(x) && read_double(y) ) ) return false;
 	p = std::pair<double,double>(x,y);
 	return true;
 }
-template<> bool read_table2::read_next(std::string& str) { return read_string(str); }
+template<> bool line_parser::read_next(std::string& str) { return read_string(str); }
 #if __cplusplus >= 201703L
-template<> bool read_table2::read_next(std::string_view& str) { return read_string_view(str); }
+template<> bool line_parser::read_next(std::string_view& str) { return read_string_view(str); }
 #endif
-template<> bool read_table2::read_next(string_view_custom& str) { return read_string_view_custom(str); }
+template<> bool line_parser::read_next(string_view_custom& str) { return read_string_view_custom(str); }
 
 /* dummy struct to be able to call the same interface to skip data
  * (useful if used with the variadic template below) */
-template<> bool read_table2::read_next(const read_table_skip_t& skip) { return read_skip(); }
-//~ template<> bool read_table2::read_next(read_table_skip_t skip) { return read_skip(); }
+template<> bool line_parser::read_next(const read_table_skip_t& skip) { return read_skip(); }
+//~ template<> bool line_parser::read_next(read_table_skip_t skip) { return read_skip(); }
 
 
 /* overloads for reading with bounds
  * example usage:
-read_table2 r(...);
+line_parser r(...);
 uint32_t x;
 r.read_next(read_bounds(x,1000U,2000U));
 */
-template<> bool read_table2::read_next(read_bounds_t<int32_t> b) {
+template<> bool line_parser::read_next(read_bounds_t<int32_t> b) {
 	return read_int32_limits(b.val,b.min,b.max);
 }
-template<> bool read_table2::read_next(read_bounds_t<uint32_t> b) {
+template<> bool line_parser::read_next(read_bounds_t<uint32_t> b) {
 	return read_uint32_limits(b.val,b.min,b.max);
 }
-template<> bool read_table2::read_next(read_bounds_t<int64_t> b) {
+template<> bool line_parser::read_next(read_bounds_t<int64_t> b) {
 	return read_int64_limits(b.val,b.min,b.max);
 }
-template<> bool read_table2::read_next(read_bounds_t<uint64_t> b) {
+template<> bool line_parser::read_next(read_bounds_t<uint64_t> b) {
 	return read_uint64_limits(b.val,b.min,b.max);
 }
-template<> bool read_table2::read_next(read_bounds_t<int16_t> b) {
+template<> bool line_parser::read_next(read_bounds_t<int16_t> b) {
 	return read_int16_limits(b.val,b.min,b.max);
 }
-template<> bool read_table2::read_next(read_bounds_t<uint16_t> b) {
+template<> bool line_parser::read_next(read_bounds_t<uint16_t> b) {
 	return read_uint16_limits(b.val,b.min,b.max);
 }
-template<> bool read_table2::read_next(read_bounds_t<double> b) {
+template<> bool line_parser::read_next(read_bounds_t<double> b) {
 	return read_double_limits(b.val,b.min,b.max);
 }
-template<> bool read_table2::read_next(read_bounds_t<std::pair<double,double> > b) {
+template<> bool line_parser::read_next(read_bounds_t<std::pair<double,double> > b) {
 	double x,y;
 	if( !(read_double_limits(x,b.min.first,b.max.first) &&
 		read_double_limits(y,b.min.second,b.max.second) ) ) return false;
@@ -822,9 +865,9 @@ template<> bool read_table2::read_next(read_bounds_t<std::pair<double,double> > 
 /* recursive templated function to convert whole line using one function call only
  * note: recursion will be probably eliminated and the whole function expanded to
  * the actual sequence of conversions needed */
-//~ bool read_table2::read() { return true; }
+//~ bool line_parser::read() { return true; }
 template<class first, class ...rest>
-bool read_table2::read(first&& val, rest&&... vals) {
+bool line_parser::read(first&& val, rest&&... vals) {
 	if(!read_next(val)) return false;
 	return read(vals...);
 }
