@@ -137,7 +137,12 @@ struct string_view_custom {
 	size_t length() const { return len; }
 	size_t size() const { return len; }
 	char operator [] (size_t i) const { return str[i]; }
-	int print(FILE* f) const { return len>INT32_MAX?-1:fprintf(f,"%.*s",(int)len,str); }
+	int print(FILE* f) const {
+		if(len == 0) return 0;
+		if(len <= INT32_MAX) return fprintf(f,"%.*s",(int)len,str);
+		return -1;
+	}
+	string_view_custom():str(0),len(0) { }
 };
 template<class ostream>
 ostream& operator << (ostream& s, const string_view_custom& str) {
@@ -235,9 +240,9 @@ struct line_parser {
 		 * 	- read_bounds_t for specifying minimum and maximum value for the input
 		 * see below for more explanation */
 		/* try to parse one value from the currently read line */
-		template<class T> bool read_next(T& val);
+		template<class T> bool read_next(T& val, bool advance_pos = true);
 		/* overload of the previous for reading values with bounds */
-		template<class T> bool read_next(read_bounds_t<T> val);
+		template<class T> bool read_next(read_bounds_t<T> val, bool advance_pos = true);
 		/* try to parse whole line (read previously with read_line()),
 		 * into the given list of parameters */
 		bool read() { return true; }
@@ -267,41 +272,41 @@ struct line_parser {
 		/* skip next field, ignoring any content */
 		bool read_skip();
 		/* read one 32-bit signed integer in the given limits */
-		bool read_int32_limits(int32_t& i, int32_t min, int32_t max);
-		bool read_int32(int32_t& i) { return read_int32_limits(i,INT32_MIN,INT32_MAX); }
+		bool read_int32_limits(int32_t& i, int32_t min, int32_t max, bool advance_pos = true);
+		bool read_int32(int32_t& i, bool advance_pos = true) { return read_int32_limits(i,INT32_MIN,INT32_MAX,advance_pos); }
 		/* read one 32-bit unsigned integer in the given limits */
-		bool read_uint32_limits(uint32_t& i, uint32_t min, uint32_t max);
-		bool read_uint32(uint32_t& i) { return read_uint32_limits(i,0,UINT32_MAX); }
+		bool read_uint32_limits(uint32_t& i, uint32_t min, uint32_t max, bool advance_pos = true);
+		bool read_uint32(uint32_t& i, bool advance_pos = true) { return read_uint32_limits(i,0,UINT32_MAX,advance_pos); }
 		/* read one 64-bit signed integer in the given limits */
-		bool read_int64_limits(int64_t& i, int64_t min, int64_t max);
-		bool read_int64(int64_t& i) { return read_int64_limits(i,INT64_MIN,INT64_MAX); }
+		bool read_int64_limits(int64_t& i, int64_t min, int64_t max, bool advance_pos = true);
+		bool read_int64(int64_t& i, bool advance_pos = true) { return read_int64_limits(i,INT64_MIN,INT64_MAX,advance_pos); }
 		/* read one 64-bit unsigned integer in the given limits */
-		bool read_uint64_limits(uint64_t& i, uint64_t min, uint64_t max);
-		bool read_uint64(uint64_t& i) { return read_uint64_limits(i,0,UINT64_MAX); }
+		bool read_uint64_limits(uint64_t& i, uint64_t min, uint64_t max, bool advance_pos = true);
+		bool read_uint64(uint64_t& i, bool advance_pos = true) { return read_uint64_limits(i,0,UINT64_MAX,advance_pos); }
 		/* read one 16-bit signed integer in the given limits */
-		bool read_int16_limits(int16_t& i, int16_t min, int16_t max);
-		bool read_int16(int16_t& i) { return read_int16_limits(i,INT16_MIN,INT16_MAX); }
+		bool read_int16_limits(int16_t& i, int16_t min, int16_t max, bool advance_pos = true);
+		bool read_int16(int16_t& i, bool advance_pos = true) { return read_int16_limits(i,INT16_MIN,INT16_MAX,advance_pos); }
 		/* read one 16-bit unsigned integer in the given limits */
-		bool read_uint16_limits(uint16_t& i, uint16_t min, uint16_t max);
-		bool read_uint16(uint16_t& i) { return read_uint16_limits(i,0,UINT16_MAX); }
+		bool read_uint16_limits(uint16_t& i, uint16_t min, uint16_t max, bool advance_pos = true);
+		bool read_uint16(uint16_t& i, bool advance_pos = true) { return read_uint16_limits(i,0,UINT16_MAX,advance_pos); }
 		/* read one double value in the given limits */
-		bool read_double_limits(double& d, double min, double max);
-		bool read_double(double& d);
+		bool read_double_limits(double& d, double min, double max, bool advance_pos = true);
+		bool read_double(double& d, bool advance_pos = true);
 		/* read string, copying from the buffer */
-		bool read_string(std::string& str);
+		bool read_string(std::string& str, bool advance_pos = true);
 		/* read string, return readonly view */
 #if __cplusplus >= 201703L
-		bool read_string_view(std::string_view& str);
+		bool read_string_view(std::string_view& str, bool advance_pos = true);
 #endif
-		bool read_string_view_custom(string_view_custom& str);
+		bool read_string_view_custom(string_view_custom& str, bool advance_pos = true);
 	
 	protected:
 		/* helper functions for the previous */
-		bool read_table_pre_check();
+		bool read_table_pre_check(bool advance_pos);
 		bool read_table_post_check(const char* c2);
 		/* read string return start position and length
 		 *  -- the other read_string functions then use these to create the string_view or copy to a string */
-		bool read_string2(std::pair<size_t,size_t>& pos1);
+		bool read_string2(std::pair<size_t,size_t>& pos1, bool advance_pos = true);
 };
 
 
@@ -449,21 +454,24 @@ bool read_table2::read_line(bool skip) {
 }
 
 /* checks to be performed before trying to convert a field */
-bool line_parser::read_table_pre_check() {
+bool line_parser::read_table_pre_check(bool advance_pos) {
 	if(last_error == T_EOF || last_error == T_EOL ||
 		last_error == T_READ_ERROR || last_error == T_ERROR_FOPEN) return false;
 	/* 1. skip any blanks */
+	size_t old_pos = pos;
 	size_t len = buf.size();
 	for(;pos < len; pos++)
 		if( ! (buf[pos] == ' ' || buf[pos] == '\t') ) break;
 	/* 2. check for end of line or comment */
 	if(pos == len || buf[pos] == '\n' || (comment && buf[pos] == comment) ) {
 		last_error = T_EOL;
+		if(!advance_pos) pos = old_pos;
 		return false;
 	}
 	/* 3. check for field delimiter (if we have any) */
 	if(delim && buf[pos] == delim) {
 		last_error = T_MISSING;
+		if(!advance_pos) pos = old_pos;
 		return false;
 	}
 	return true;
@@ -546,8 +554,9 @@ bool line_parser::read_skip() {
 
 
 /* return the string value in the next field -- internal helper */
-bool line_parser::read_string2(std::pair<size_t,size_t>& pos1) {
+bool line_parser::read_string2(std::pair<size_t,size_t>& pos1, bool advance_pos) {
 	size_t len = buf.size();
+	size_t old_pos = pos;
 	if(delim) {
 		if(last_error == T_EOF || last_error == T_EOL ||
 			last_error == T_READ_ERROR || last_error == T_ERROR_FOPEN) return false;
@@ -561,7 +570,7 @@ bool line_parser::read_string2(std::pair<size_t,size_t>& pos1) {
 		else last_error = T_EOL; /* save that we were already at the end of a line; trying to read another field will result in an error */
 	}
 	else {
-		if(!read_table_pre_check()) return false;
+		if(!read_table_pre_check(advance_pos)) return false;
 		size_t p1 = pos; /* start of the string */
 		for(;pos<len;pos++) if(buf[pos] == ' ' || buf[pos] == '\t' || buf[pos] == '\n' ||
 			(comment && buf[pos] == comment)) break;
@@ -570,33 +579,34 @@ bool line_parser::read_string2(std::pair<size_t,size_t>& pos1) {
 		pos1.first = p1;
 		pos1.second = pos - p1;
 	}
+	if(!advance_pos) pos = old_pos;
 	return true;
 }
 
 #if __cplusplus >= 201703L
 /* return the string value in the next field as a string_view
  * NOTE: it will be invalidated when a new line is read */
-bool line_parser::read_string_view(std::string_view& str) {
+bool line_parser::read_string_view(std::string_view& str, bool advance_pos) {
 	std::pair<size_t,size_t> pos1;
-	if(!read_string2(pos1)) return false;
+	if(!read_string2(pos1,advance_pos)) return false;
 	str = std::string_view(buf.data() + pos1.first, pos1.second);
 	return true;
 }
 #endif
 /* same but using a custom class instead of relying on the C++17
  * std::string_view */
-bool line_parser::read_string_view_custom(string_view_custom& str) {
+bool line_parser::read_string_view_custom(string_view_custom& str, bool advance_pos) {
 	std::pair<size_t,size_t> pos1;
-	if(!read_string2(pos1)) return false;
+	if(!read_string2(pos1,advance_pos)) return false;
 	str.str = buf.data() + pos1.first;
 	str.len = pos1.second;
 	return true;
 }
 
 /* return the string value in the next field as a copy */
-bool line_parser::read_string(std::string& str) {
+bool line_parser::read_string(std::string& str, bool advance_pos) {
 	std::pair<size_t,size_t> pos1;
-	if(!read_string2(pos1)) return false;
+	if(!read_string2(pos1,advance_pos)) return false;
 	str.assign(buf,pos1.first,pos1.second);
 	return true;
 }
@@ -606,9 +616,11 @@ bool line_parser::read_string(std::string& str) {
  * check explicitely that it is within the limits provided
  * (note: the limits are inclusive, so either min or max is OK)
  * return true on success, false on error */
-bool line_parser::read_int32_limits(int32_t& i, int32_t min, int32_t max) {
-	if(!read_table_pre_check()) return false;
+bool line_parser::read_int32_limits(int32_t& i, int32_t min, int32_t max, bool advance_pos) {
+	size_t old_pos = pos;
+	if(!read_table_pre_check(advance_pos)) return false;
 	errno = 0;
+	bool ret;
 	char* c2;
 	long res = strtol(buf.c_str() + pos, &c2, base);
 	/* check that result fits in the given range -- note: long might be 64-bit */
@@ -616,18 +628,24 @@ bool line_parser::read_int32_limits(int32_t& i, int32_t min, int32_t max) {
 		last_error = T_OVERFLOW;
 		if(res > (long)max) i = max;
 		if(res < (long)min) i = min;
-		return false;
+		ret = false;
 	}
-	i = res; /* store potential result -- at this point, it is ensured that this does not involve overflow */
-	/* advance position after the number, check if there is proper field separator */
-	return read_table_post_check(c2);
+	else {
+		i = res; /* store potential result -- at this point, it is ensured that this does not involve overflow */
+		/* advance position after the number, check if there is proper field separator */
+		ret = read_table_post_check(c2);
+	}
+	if(!advance_pos) pos = old_pos;
+	return ret;
 }
 
 /* try to convert the next value to 64-bit integer
  * return true on success, false on error */
-bool line_parser::read_int64_limits(int64_t& i, int64_t min, int64_t max) {
-	if(!read_table_pre_check()) return false;
+bool line_parser::read_int64_limits(int64_t& i, int64_t min, int64_t max, bool advance_pos) {
+	size_t old_pos = pos;
+	if(!read_table_pre_check(advance_pos)) return false;
 	errno = 0;
+	bool ret = true;
 	char* c2;
 	/* note: try to determine if we should use long or long long */
 	long res;
@@ -638,9 +656,9 @@ bool line_parser::read_int64_limits(int64_t& i, int64_t min, int64_t max) {
 			last_error = T_OVERFLOW;
 			if(res > (long)max) i = max;
 			if(res < (long)min) i = min;
-			return false;
+			ret = false;
 		}
-		i = (int64_t)res; /* store potential result */
+		else i = (int64_t)res; /* store potential result */
 	}
 	else {
 		res2 = strtoll(buf.c_str() + pos, &c2, base);
@@ -648,19 +666,23 @@ bool line_parser::read_int64_limits(int64_t& i, int64_t min, int64_t max) {
 			last_error = T_OVERFLOW;
 			if(res2 > (long long)max) i = max;
 			if(res2 < (long long)min) i = min;
-			return false;
+			ret = false;
 		}
-		i = (int64_t)res2; /* store potential result */
+		else i = (int64_t)res2; /* store potential result */
 	}
 	/* advance position after the number, check if there is proper field separator */
-	return read_table_post_check(c2);
+	if(ret) ret = read_table_post_check(c2);
+	if(!advance_pos) pos = old_pos;
+	return ret;
 }
 
 /* try to convert the next value to 32-bit unsigned integer
  * return true on success, false on error */
-bool line_parser::read_uint32_limits(uint32_t& i, uint32_t min, uint32_t max) {
-	if(!read_table_pre_check()) return false;
+bool line_parser::read_uint32_limits(uint32_t& i, uint32_t min, uint32_t max, bool advance_pos) {
+	size_t old_pos = pos;
+	if(!read_table_pre_check(advance_pos)) return false;
 	errno = 0;
+	bool ret;
 	char* c2;
 	/* stricly require that the next character is alphanumeric
 	 * -- strtoul() will silently accept and negate negative values */
@@ -668,26 +690,34 @@ bool line_parser::read_uint32_limits(uint32_t& i, uint32_t min, uint32_t max) {
 		if(buf[pos] == '-') last_error = T_OVERFLOW;
 		else last_error = T_FORMAT;
 		i = 0;
-		return false;
+		ret = false;
 	}
-	unsigned long res = strtoul(buf.c_str() + pos, &c2, base);
-	/* check that result fits in bounds -- long might be 64-bit */
-	if(res > (unsigned long)max || res < (unsigned int)min) {
-		last_error = T_OVERFLOW;
-		if(res > (unsigned long)max) i = max;
-		if(res < (unsigned long)min) i = min;
-		return false;
+	else {
+		unsigned long res = strtoul(buf.c_str() + pos, &c2, base);
+		/* check that result fits in bounds -- long might be 64-bit */
+		if(res > (unsigned long)max || res < (unsigned int)min) {
+			last_error = T_OVERFLOW;
+			if(res > (unsigned long)max) i = max;
+			if(res < (unsigned long)min) i = min;
+			ret = false;
+		}
+		else {
+			i = res; /* store potential result */
+			/* advance position after the number, check if there is proper field separator */
+			ret = read_table_post_check(c2);
+		}
 	}
-	i = res; /* store potential result */
-	/* advance position after the number, check if there is proper field separator */
-	return read_table_post_check(c2);
+	if(!advance_pos) pos = old_pos;
+	return ret;
 }
 
 /* try to convert the next value to 64-bit unsigned integer
  * return true on success, false on error */
-bool line_parser::read_uint64_limits(uint64_t& i, uint64_t min, uint64_t max) {
-	if(!read_table_pre_check()) return false;
+bool line_parser::read_uint64_limits(uint64_t& i, uint64_t min, uint64_t max, bool advance_pos) {
+	size_t old_pos = pos;
+	if(!read_table_pre_check(advance_pos)) return false;
 	errno = 0;
+	bool ret = true;
 	char* c2;
 	/* stricly require that the next character is alphanumeric
 	 * -- strtoul() will silently accept and negate negative values */
@@ -695,94 +725,103 @@ bool line_parser::read_uint64_limits(uint64_t& i, uint64_t min, uint64_t max) {
 		if(buf[pos] == '-') last_error = T_OVERFLOW;
 		else last_error = T_FORMAT;
 		i = 0;
-		return false;
-	}
-	/* note: try to determine if to use long or long long */
-	unsigned long res;
-	unsigned long long res2;
-	if(ULONG_MAX >= UINT64_MAX) {
-		res = strtoul(buf.c_str() + pos, &c2, base);
-		/* note: this check might be unnecessary */
-		if(res > (unsigned long)max || res < (unsigned long)min) {
-			last_error = T_OVERFLOW;
-			if(res > (unsigned long)max) i = max;
-			if(res < (unsigned long)min) i = min;
-			return false;
-		}
-		i = res; /* store potential result */
+		ret = false;
 	}
 	else {
-		res2 = strtoull(buf.c_str() + pos, &c2, base);
-		if(res2 > (unsigned long long)max || res < (unsigned long long)min) {
-			last_error = T_OVERFLOW;
-			if(res > (unsigned long long)max) i = max;
-			if(res < (unsigned long long)min) i = min;
-			return false;
+		/* note: try to determine if to use long or long long */
+		unsigned long res;
+		unsigned long long res2;
+		if(ULONG_MAX >= UINT64_MAX) {
+			res = strtoul(buf.c_str() + pos, &c2, base);
+			/* note: this check might be unnecessary */
+			if(res > (unsigned long)max || res < (unsigned long)min) {
+				last_error = T_OVERFLOW;
+				if(res > (unsigned long)max) i = max;
+				if(res < (unsigned long)min) i = min;
+				ret = false;
+			}
+			else i = res; /* store potential result */
 		}
-		i = res2; /* store potential result */
+		else {
+			res2 = strtoull(buf.c_str() + pos, &c2, base);
+			if(res2 > (unsigned long long)max || res < (unsigned long long)min) {
+				last_error = T_OVERFLOW;
+				if(res > (unsigned long long)max) i = max;
+				if(res < (unsigned long long)min) i = min;
+				ret = false;
+			}
+			else i = res2; /* store potential result */
+		}
 	}
 	/* advance position after the number, check if there is proper field separator */
-	return read_table_post_check(c2);
+	if(ret) ret = read_table_post_check(c2);
+	if(!advance_pos) pos = old_pos;
+	return ret;
 }
 
 /* try to convert the next value to a 16-bit signed integer
  * return true on success, false on error
  * note: this uses the previous functions as there is no separate library
  * function for 16-bit integers anyway */
-bool line_parser::read_int16_limits(int16_t& i, int16_t min, int16_t max) {
+bool line_parser::read_int16_limits(int16_t& i, int16_t min, int16_t max, bool advance_pos) {
 	/* just use the previous function and check for overflow */
 	int32_t i2;
 	/* note: the following function already check for overflow as well */
-	bool ret = read_int32_limits(i2,(int32_t)min,(int32_t)max);
-	i = i2;
+	bool ret = read_int32_limits(i2,(int32_t)min,(int32_t)max,advance_pos);
+	if(ret) i = i2;
 	return ret;
 }
 
 /* try to convert the next value to a 16-bit unsigned integer
  * return true on success, false on error */
-bool line_parser::read_uint16_limits(uint16_t& i, uint16_t min, uint16_t max) {
+bool line_parser::read_uint16_limits(uint16_t& i, uint16_t min, uint16_t max, bool advance_pos) {
 	/* just use the previous function and check for overflow */
 	uint32_t i2;
-	bool ret = !read_uint32_limits(i2,(uint32_t)min,(uint32_t)max);
-	i = i2;
+	bool ret = read_uint32_limits(i2,(uint32_t)min,(uint32_t)max,advance_pos);
+	if(ret) i = i2;
 	return ret;
 }
 
 /* try to convert the next value to a double precision float value
  * return true on success, false on error */
-bool line_parser::read_double(double& d) {
-	if(!read_table_pre_check()) return false;
+bool line_parser::read_double(double& d, bool advance_pos) {
+	size_t old_pos = pos;
+	if(!read_table_pre_check(advance_pos)) return false;
 	errno = 0;
 	char* c2;
 	d = strtod(buf.c_str() + pos, &c2);
 	/* advance position after the number, check if there is proper field separator */
-	if(!read_table_post_check(c2)) return false;
-	if(allow_nan_inf == false) {
+	bool ret = read_table_post_check(c2);
+	if(ret && allow_nan_inf == false) {
 		if(_isnan(d) || _isinf(d)) {
 			last_error = T_NAN;
-			return false;
+			ret = false;
 		}
 	}
-	return true;
+	if(!advance_pos) pos = old_pos;
+	return ret;
 }
-bool line_parser::read_double_limits(double& d, double min, double max) {
-	if(!read_table_pre_check()) return false;
+bool line_parser::read_double_limits(double& d, double min, double max, bool advance_pos) {
+	size_t old_pos = pos;
+	if(!read_table_pre_check(advance_pos)) return false;
 	errno = 0;
 	char* c2;
 	d = strtod(buf.c_str() + pos, &c2);
-	if(!read_table_post_check(c2)) return false;
+	bool ret = read_table_post_check(c2);
 	if(_isnan(d)) {
 		last_error = T_NAN;
-		return false;
+		ret = false;
 	}
-	
-	/* note: this will not be true if min or max is NaN, not sure if
-	 * that's a problem */
-	if(d > max || d < min) {
-		last_error = T_OVERFLOW;
-		return false;
+	else {
+		/* note: this will not be true if min or max is NaN, not sure if
+		 * that's a problem */
+		if( ! (d <= max && d >= min) ) {
+			last_error = T_OVERFLOW;
+			ret = false;
+		}
 	}
-	return true;
+	if(!advance_pos) pos = old_pos;
+	return ret;
 }
 
 
@@ -802,28 +841,30 @@ void read_table2::write_error(std::ostream& f) const {
 
 
 /* template specializations to use the same function name */
-template<> bool line_parser::read_next(int32_t& val) { return read_int32(val); }
-template<> bool line_parser::read_next(uint32_t& val) { return read_uint32(val); }
-template<> bool line_parser::read_next(int16_t& val) { return read_int16(val); }
-template<> bool line_parser::read_next(uint16_t& val) { return read_uint16(val); }
-template<> bool line_parser::read_next(int64_t& val) { return read_int64(val); }
-template<> bool line_parser::read_next(uint64_t& val) { return read_uint64(val); }
-template<> bool line_parser::read_next(double& val) { return read_double(val); }
-template<> bool line_parser::read_next(std::pair<double,double>& p) {
+template<> bool line_parser::read_next(int32_t& val, bool advance_pos) { return read_int32(val,advance_pos); }
+template<> bool line_parser::read_next(uint32_t& val, bool advance_pos) { return read_uint32(val,advance_pos); }
+template<> bool line_parser::read_next(int16_t& val, bool advance_pos) { return read_int16(val,advance_pos); }
+template<> bool line_parser::read_next(uint16_t& val, bool advance_pos) { return read_uint16(val,advance_pos); }
+template<> bool line_parser::read_next(int64_t& val, bool advance_pos) { return read_int64(val,advance_pos); }
+template<> bool line_parser::read_next(uint64_t& val, bool advance_pos) { return read_uint64(val,advance_pos); }
+template<> bool line_parser::read_next(double& val, bool advance_pos) { return read_double(val,advance_pos); }
+template<> bool line_parser::read_next(std::pair<double,double>& p, bool advance_pos) {
 	double x,y;
-	if( !( read_double(x) && read_double(y) ) ) return false;
-	p = std::pair<double,double>(x,y);
-	return true;
+	size_t old_pos = pos;
+	bool ret = read_double(x) && read_double(y);
+	if(ret) p = std::pair<double,double>(x,y);
+	if(!advance_pos) pos = old_pos;
+	return ret;
 }
-template<> bool line_parser::read_next(std::string& str) { return read_string(str); }
+template<> bool line_parser::read_next(std::string& str, bool advance_pos) { return read_string(str,advance_pos); }
 #if __cplusplus >= 201703L
-template<> bool line_parser::read_next(std::string_view& str) { return read_string_view(str); }
+template<> bool line_parser::read_next(std::string_view& str, bool advance_pos) { return read_string_view(str,advance_pos); }
 #endif
-template<> bool line_parser::read_next(string_view_custom& str) { return read_string_view_custom(str); }
+template<> bool line_parser::read_next(string_view_custom& str, bool advance_pos) { return read_string_view_custom(str,advance_pos); }
 
 /* dummy struct to be able to call the same interface to skip data
  * (useful if used with the variadic template below) */
-template<> bool line_parser::read_next(const read_table_skip_t& skip) { return read_skip(); }
+template<> bool line_parser::read_next(const read_table_skip_t& skip, bool advance_pos) { return read_skip(); }
 //~ template<> bool line_parser::read_next(read_table_skip_t skip) { return read_skip(); }
 
 
@@ -833,33 +874,35 @@ line_parser r(...);
 uint32_t x;
 r.read_next(read_bounds(x,1000U,2000U));
 */
-template<> bool line_parser::read_next(read_bounds_t<int32_t> b) {
-	return read_int32_limits(b.val,b.min,b.max);
+template<> bool line_parser::read_next(read_bounds_t<int32_t> b, bool advance_pos) {
+	return read_int32_limits(b.val,b.min,b.max,advance_pos);
 }
-template<> bool line_parser::read_next(read_bounds_t<uint32_t> b) {
-	return read_uint32_limits(b.val,b.min,b.max);
+template<> bool line_parser::read_next(read_bounds_t<uint32_t> b, bool advance_pos) {
+	return read_uint32_limits(b.val,b.min,b.max,advance_pos);
 }
-template<> bool line_parser::read_next(read_bounds_t<int64_t> b) {
-	return read_int64_limits(b.val,b.min,b.max);
+template<> bool line_parser::read_next(read_bounds_t<int64_t> b, bool advance_pos) {
+	return read_int64_limits(b.val,b.min,b.max,advance_pos);
 }
-template<> bool line_parser::read_next(read_bounds_t<uint64_t> b) {
-	return read_uint64_limits(b.val,b.min,b.max);
+template<> bool line_parser::read_next(read_bounds_t<uint64_t> b, bool advance_pos) {
+	return read_uint64_limits(b.val,b.min,b.max,advance_pos);
 }
-template<> bool line_parser::read_next(read_bounds_t<int16_t> b) {
-	return read_int16_limits(b.val,b.min,b.max);
+template<> bool line_parser::read_next(read_bounds_t<int16_t> b, bool advance_pos) {
+	return read_int16_limits(b.val,b.min,b.max,advance_pos);
 }
-template<> bool line_parser::read_next(read_bounds_t<uint16_t> b) {
-	return read_uint16_limits(b.val,b.min,b.max);
+template<> bool line_parser::read_next(read_bounds_t<uint16_t> b, bool advance_pos) {
+	return read_uint16_limits(b.val,b.min,b.max,advance_pos);
 }
-template<> bool line_parser::read_next(read_bounds_t<double> b) {
-	return read_double_limits(b.val,b.min,b.max);
+template<> bool line_parser::read_next(read_bounds_t<double> b, bool advance_pos) {
+	return read_double_limits(b.val,b.min,b.max,advance_pos);
 }
-template<> bool line_parser::read_next(read_bounds_t<std::pair<double,double> > b) {
+template<> bool line_parser::read_next(read_bounds_t<std::pair<double,double> > b, bool advance_pos) {
 	double x,y;
-	if( !(read_double_limits(x,b.min.first,b.max.first) &&
-		read_double_limits(y,b.min.second,b.max.second) ) ) return false;
-	b.val = std::make_pair(x,y);
-	return true;
+	size_t old_pos = pos;
+	bool ret = read_double_limits(x,b.min.first,b.max.first) &&
+		read_double_limits(y,b.min.second,b.max.second);
+	if(ret) b.val = std::make_pair(x,y);
+	if(!advance_pos) pos = old_pos;
+	return ret;
 }
 
 
@@ -869,7 +912,7 @@ template<> bool line_parser::read_next(read_bounds_t<std::pair<double,double> > 
 //~ bool line_parser::read() { return true; }
 template<class first, class ...rest>
 bool line_parser::read(first&& val, rest&&... vals) {
-	if(!read_next(val)) return false;
+	if(!read_next(val,true)) return false;
 	return read(vals...);
 }
 
