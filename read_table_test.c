@@ -57,8 +57,20 @@ void test3(read_table* rt) {
 	}
 }
 
+/* 4. uint32_t, double, string, int16_t */
+void test4(read_table* rt) {
+	while(read_table_line(rt) == 0) {
+		uint32_t x; int16_t y; double d;
+		const char* str;
+		size_t len;
+		if( read_table_uint32_limits(rt,&x,min1,max1) || read_table_double(rt,&d) ||
+			read_table_string(rt,&str,&len) || read_table_int16_limits(rt,&y,min2,max2) )
+				read_table_write_error(rt,stderr);
+		else fprintf(stdout,"Read: %u\t%f\t%hd\t%.*s\n",x,d,y,(int)len,str);
+	}
+}
 
-void (*func[])(read_table*) = { test1, test2, test3 };
+void (*func[])(read_table*) = { test1, test2, test3, test4 };
 
 
 int main(int argc, char **argv)
@@ -66,6 +78,8 @@ int main(int argc, char **argv)
 	int testcase = 0;
 	char* fn = 0;
 	int i;
+	char delim = 0;
+	char comment = 0;
 	for(i=1;i<argc;i++) if(argv[i][0] == '-') switch(argv[i][1]) {
 		case 'i':
 			fn = argv[i+1];
@@ -91,10 +105,20 @@ int main(int argc, char **argv)
 				}
 				break;
 			}
+			fprintf(stderr,"Unknown parameter: %s!\n",argv[i]);
+			break;
+		case 'd':
+			delim = argv[i+1][0];
+			i++;
+			break;
+		case 'c':
+			comment = argv[i+1][0];
+			i++;
+			break;
 		default:
 			if(isdigit(argv[i][1])) {
 				testcase = atoi(argv[i]+1);
-				if(testcase >= 3) testcase = 0;
+				if(testcase >= 4) testcase = 0;
 				break;
 			}
 			fprintf(stderr,"Unknown parameter: %s!\n",argv[i]);
@@ -108,6 +132,8 @@ int main(int argc, char **argv)
 		fprintf(stderr,"Error opening input!\n");
 		return 1;
 	}
+	if(delim) read_table_set_delim(rt,delim);
+	if(comment) read_table_set_comment(rt,comment);
 	
 	func[testcase](rt);
 	read_table_free(rt);

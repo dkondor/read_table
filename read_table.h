@@ -1,4 +1,4 @@
-/*
+/*  -*- C++ -*-
  * read_table.h -- simple and robust general methods for reading numeric data
  * 	from text files, e.g. TSV or CSV
  * 
@@ -280,6 +280,7 @@ static int read_table_pre_check(read_table* r) {
 	return 0;
 }
 
+
 /* perform checks needed after number conversion */
 static int read_table_post_check(read_table* r, char* c2) {
 	/* 0. check for format errors and overflow as indicated by strto* */
@@ -329,12 +330,14 @@ static int read_table_skip(read_table* r) {
 	
 	if(r->delim) {
 		/* if there is a delimiter, just advance until after the next one */
-		for(;r->pos<r->line_len;r->pos++) if(r->buf[r->pos] == r->delim) break;
 		if(r->pos == r->line_len) {
 			r->last_error = T_EOL;
 			return 1;
 		}
-		r->pos++; /* note: we do not care what is after the delimiter */
+		for(;r->pos<r->line_len;r->pos++) if(r->buf[r->pos] == r->delim || r->buf[r->pos] == '\n' ||
+			(r->comment && r->buf[r->pos] == r->comment)) break;
+		
+		if(r->pos<r->line_len && r->buf[r->pos] == r->delim) r->pos++; /* note: we do not care what is after the delimiter */
 	}
 	else {
 		/* no delimiter, skip any blanks, then skip all non-blanks */
@@ -348,11 +351,44 @@ static int read_table_skip(read_table* r) {
 			r->buf[r->pos] == '\t' || r->buf[r->pos] == '\n' ||
 			(r->comment && r->buf[r->pos] == r->comment)) break;
 		/* we do not care what is after the field, now we are either at a
-		* 	blank or line end */
+		 * 	blank or line end */
 	}
 	
 	r->col++;
 	r->last_error = T_OK;
+	return 0;
+}
+
+/* return the string value in the next field;
+ * str is set to the beginning of the next field and the length is stored in len
+ * NOTE: str is not NULL-terminated (it points to the internal buffer), and becomes
+ * invalid (overwritten or potentially freed) when reading the next line
+ * use strndup() on the result to make a local copy */
+static int read_table_string(read_table* r, const char** str, size_t* len) {
+	if(!(r && str && len)) return 1;
+	if(r->delim) {
+		if(r->last_error == T_EOF || r->last_error == T_EOL ||
+			r->last_error == T_READ_ERROR || r->last_error == T_ERROR_FOPEN) return 1;
+		/* note: having an empty string is OK in this case */
+		size_t p1 = r->pos; /* start of the string */
+		for(;r->pos<r->line_len;r->pos++) if(r->buf[r->pos] == r->delim || r->buf[r->pos] == '\n' ||
+			(r->comment && r->buf[r->pos] == r->comment)) break;
+		*len = r->pos - p1;
+		*str = r->buf + p1;
+		if(r->pos<r->line_len && r->buf[r->pos] == r->delim) r->pos++; /* note: we do not care what is after the delimiter */
+		else r->last_error = T_EOL; /* save that we were already at the end of a line; trying to read another field will result in an error */
+	}
+	else {
+		if(read_table_pre_check(r)) return 1;
+		size_t p1 = r->pos; /* start of the string */
+		for(;r->pos<r->line_len;r->pos++) if(r->buf[r->pos] == ' ' ||
+			r->buf[r->pos] == '\t' || r->buf[r->pos] == '\n' ||
+			(r->comment && r->buf[r->pos] == r->comment)) break;
+		/* we do not care what is after the field, now we are either at a
+		 * 	blank or line end */
+		*len = r->pos - p1;
+		*str = r->buf + p1;
+	}
 	return 0;
 }
 
@@ -367,10 +403,13 @@ static int read_table_int32_limits(read_table* r, int32_t* i, int32_t min, int32
 	long res = strtol(r->buf + r->pos, &c2, r->base);
 	/* check that result fits in 32-bit integer -- long might be 64-bit */
 	if(res > (long)max || res < (long)min) {
+		if(res > (long)max) *i = max;
+		if(res < (long)min) *i = min;
 		r->last_error = T_OVERFLOW;
 		return 1;
 	}
-	*i = res; /* store potential result */
+	*i = res; /* store potential result -- note: this is always well-defined
+		(i.e. res can be represented as an int32_t at this point) */
 	/* advance position after the number, check if there is proper field separator */
 	return read_table_post_check(r,c2);
 }
@@ -393,6 +432,8 @@ static int read_table_int64_limits(read_table* r, int64_t* i, int64_t min, int64
 		/* note: this check might be unnecessary */
 		if(res > (long)max || res < (long)min) {
 			r->last_error = T_OVERFLOW;
+			if(res > (long)max) *i = max;
+			if(res < (long)min) *i = min;
 			return 1;
 		}
 		*i = res; /* store potential result */
@@ -401,6 +442,8 @@ static int read_table_int64_limits(read_table* r, int64_t* i, int64_t min, int64
 		res2 = strtoll(r->buf + r->pos, &c2, r->base);
 		if(res2 > (long long)max || res2 < (long long)min) {
 			r->last_error = T_OVERFLOW;
+			if(res2 > (long long)max) *i = max;
+			if(res2 < (long long)min) *i = min;
 			return 1;
 		}
 		*i = res2; /* store potential result */
@@ -423,12 +466,15 @@ static int read_table_uint32_limits(read_table* r, uint32_t* i, uint32_t min, ui
 	if( ! (isalnum(r->buf[r->pos]) || r->buf[r->pos] == '+') ) {
 		if(r->buf[r->pos] == '-') r->last_error = T_OVERFLOW;
 		else r->last_error = T_FORMAT;
+		*i = 0;
 		return 1;
 	}
 	unsigned long res = strtoul(r->buf + r->pos, &c2, r->base);
 	/* check that result fits in 32-bit integer -- long might be 64-bit */
 	if(res > (unsigned long)max || res < (unsigned int)min) {
 		r->last_error = T_OVERFLOW;
+		if(res > (unsigned long)max) *i = max;
+		if(res < (unsigned long)min) *i = min;
 		return 1;
 	}
 	*i = res; /* store potential result */
@@ -450,6 +496,7 @@ static int read_table_uint64_limits(read_table* r, uint64_t* i, uint64_t min, ui
 	if( ! (isalnum(r->buf[r->pos]) || r->buf[r->pos] == '+') ) {
 		if(r->buf[r->pos] == '-') r->last_error = T_OVERFLOW;
 		else r->last_error = T_FORMAT;
+		*i = 0;
 		return 1;
 	}
 	/* note: try to determine if to use long or long long */
@@ -460,6 +507,8 @@ static int read_table_uint64_limits(read_table* r, uint64_t* i, uint64_t min, ui
 		/* note: this check might be unnecessary */
 		if(res > (unsigned long)max || res < (unsigned long)min) {
 			r->last_error = T_OVERFLOW;
+			if(res > (unsigned long)max) *i = max;
+			if(res < (unsigned long)min) *i = min;
 			return 1;
 		}
 		*i = res; /* store potential result */
@@ -468,6 +517,8 @@ static int read_table_uint64_limits(read_table* r, uint64_t* i, uint64_t min, ui
 		res2 = strtoull(r->buf + r->pos, &c2, r->base);
 		if(res2 > (unsigned long long)max || res < (unsigned long long)min) {
 			r->last_error = T_OVERFLOW;
+			if(res > (unsigned long long)max) *i = max;
+			if(res < (unsigned long long)min) *i = min;
 			return 1;
 		}
 		*i = res2; /* store potential result */
@@ -485,9 +536,9 @@ static int read_table_int16_limits(read_table* r, int16_t* i, int16_t min, int16
 	/* just use the previous function and check for overflow */
 	int32_t i2;
 	/* note: the following function already check for overflow as well */
-	if(read_table_int32_limits(r,&i2,(int32_t)min,(int32_t)max)) return 1;
-	*i = i2;
-	return 0;
+	int ret = read_table_int32_limits(r,&i2,(int32_t)min,(int32_t)max);
+	*i = i2; /* note: the above ensures that i2 is between [min,max], so this is always well-defined */
+	return ret;
 }
 static inline int read_table_int16(read_table* r, int16_t* i) {
 	return read_table_int16_limits(r,i,INT16_MIN,INT16_MAX);
@@ -498,9 +549,9 @@ static inline int read_table_int16(read_table* r, int16_t* i) {
 static int read_table_uint16_limits(read_table* r, uint16_t* i, uint16_t min, uint16_t max) {
 	/* just use the previous function and check for overflow */
 	uint32_t i2;
-	if(read_table_uint32_limits(r,&i2,(uint32_t)min,(uint32_t)max)) return 1;
+	int ret = read_table_uint32_limits(r,&i2,(uint32_t)min,(uint32_t)max);
 	*i = i2;
-	return 0;
+	return ret;
 }
 static inline int read_table_uint16(read_table* r, uint16_t* i) {
 	return read_table_uint16_limits(r,i,0,UINT16_MAX);
@@ -614,6 +665,8 @@ static const char* read_table_get_line_str(const read_table* r) {
 #ifdef __cplusplus
 
 #include <utility>
+#include <string>
+
 
 template<class T>
 static int read_table_next(read_table* r, T& val) {
@@ -643,6 +696,40 @@ template<> int read_table_next(read_table* r, std::pair<double,double>& p) {
 	double x,y;
 	if(read_table_double(r,&x) || read_table_double(r,&y)) return 1;
 	p = std::make_pair(x,y);
+	return 0;
+}
+#if __cplusplus >= 201703L
+#include <string_view>
+template<> int read_table_next(read_table* r, std::string_view& str) {
+	const char* s1;
+	size_t len;
+	if(read_table_string(r,&s1,&len)) return 1;
+	str = std::string_view(s1,len);
+	return 0;
+}
+#endif
+template<> int read_table_next(read_table* r, std::string& str) {
+	const char* s1;
+	size_t len;
+	if(read_table_string(r,&s1,&len)) return 1;
+	str.assign(s1,len);
+	return 0;
+}
+struct string_view_custom {
+	const char* str;
+	size_t len;
+	const char* data() const { return str; }
+	size_t length() const { return len; }
+	size_t size() const { return len; }
+	char operator [] (size_t i) const { return str[i]; }
+	int print(FILE* f) const { return len>INT32_MAX?-1:fprintf(f,"%.*s",(int)len,str); }
+};
+template<> int read_table_next(read_table* r, string_view_custom& str) {
+	const char* s1;
+	size_t len;
+	if(read_table_string(r,&s1,&len)) return 1;
+	str.str = s1;
+	str.len = len;
 	return 0;
 }
 /* dummy struct to be able to call the same interface to skip data

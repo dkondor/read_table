@@ -57,14 +57,29 @@ void test3(read_table2&& rt) {
 	}
 }
 
+/* 4. uint32_t, double, string, int16_t */
+void test4(read_table2&& rt) {
+	while(rt.read_line()) {
+		uint32_t x; int16_t y; double d;
+#if __cplusplus >= 201703L
+		std::string_view str;
+#else
+		string_view_custom str;
+#endif
+		if( !rt.read( read_bounds(x,min1,max1), d, str, read_bounds(y,min2,max2) ) ) rt.write_error(err_stream);
+		else fprintf(stdout,"Read: %u\t%f\t%hd\t%.*s\n",x,d,y,(int)str.length(),str.data());
+	}
+}
 
-void (*func[])(read_table2&&) = { test1, test2, test3 };
+void (*func[])(read_table2&&) = { test1, test2, test3, test4 };
 
 
 int main(int argc, char **argv)
 {
 	int testcase = 0;
 	char* fn = 0;
+	char delim = 0;
+	char comment = 0;
 	for(int i=1;i<argc;i++) if(argv[i][0] == '-') switch(argv[i][1]) {
 		case 'i':
 			fn = argv[i+1];
@@ -90,18 +105,30 @@ int main(int argc, char **argv)
 				}
 				break;
 			}
+			fprintf(stderr,"Unknown parameter: %s!\n",argv[i]);
+			break;
+		case 'd':
+			delim = argv[i+1][0];
+			i++;
+			break;
+		case 'c':
+			comment = argv[i+1][0];
+			i++;
+			break;
 		default:
 			if(isdigit(argv[i][1])) {
 				testcase = atoi(argv[i]+1);
-				if(testcase >= 3) testcase = 0;
+				if(testcase >= 4) testcase = 0;
 				break;
 			}
 			fprintf(stderr,"Unknown parameter: %s!\n",argv[i]);
 			break;
 	}
 	
-	if(fn) func[testcase](read_table2(fn));
-	else func[testcase](read_table2(input_stream));
+	read_table2 rt(fn,input_stream);
+	if(delim) rt.set_delim(delim);
+	if(comment) rt.set_comment(comment);
+	func[testcase](std::move(rt));
 	
 	return 0;
 }
