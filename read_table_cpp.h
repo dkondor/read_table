@@ -438,6 +438,7 @@ bool read_table2::read_line(bool skip) {
 			for(; pos < len; pos++)
 				if( ! (buf[pos] == ' ' || buf[pos] == '\t') ) break;
 			if(comment) if(buf[pos] == comment) continue; /* check for comment character first */
+			if(delim) pos = 0; /* if there is a delimiter character then whitespace at the beginning of a line is not skipped */
 			if(pos < len) break; /* there is some data in the line */
 		}
 		else break; /* if empty lines should not be skipped */
