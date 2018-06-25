@@ -71,6 +71,7 @@ if(r.get_last_error() != T_EOF) { // handle error
 #include <ostream>
 #include <fstream>
 #include <string>
+#include <string.h>
 #if __cplusplus >= 201703L
 #include <string_view>
 #endif
@@ -143,6 +144,12 @@ struct string_view_custom {
 		return -1;
 	}
 	string_view_custom():str(0),len(0) { }
+	bool operator == (const string_view_custom& v) const {
+		if(len != v.len) return false; /* lengths must be the same */
+		if(len == 0) return true; /* empty strings are considered equal */
+		if(str && v.str) return strncmp(str,v.str,len) == 0;
+		else return false; /* str or v.str is null, this is probably an error */
+	}
 };
 template<class ostream>
 ostream& operator << (ostream& s, const string_view_custom& str) {
@@ -220,6 +227,32 @@ struct line_parser {
 			line_parser_init(line_parser_params());
 		}
 		
+		/* move constructor and move assignment -- ensure the string is moved
+		line_parser(line_parser&& lp) {
+			buf = std::move(lp.buf);
+			pos = lp.pos;
+			col = lp.col;
+			base = lp.base;
+			comment = lp.comment;
+			allow_nan_inf = lp.allow_nan_inf;
+			last_error = lp.last_error;
+			lp.last_error = T_COPIED;
+			lp.pos = 0;
+			lp.col = 0;
+		}
+		line_parser& operator = (line_parser&& lp) {
+			buf = std::move(lp.buf);
+			pos = lp.pos;
+			col = lp.col;
+			base = lp.base;
+			comment = lp.comment;
+			allow_nan_inf = lp.allow_nan_inf;
+			last_error = lp.last_error;
+			lp.last_error = T_COPIED;
+			lp.pos = 0;
+			lp.col = 0;
+		}*/
+		
 		/* 2. set (copy) the internal string */
 		template<class... Args>
 		void set_line(Args&&... args) {
@@ -259,6 +292,16 @@ struct line_parser {
 		void set_comment(char comment_) { comment = comment_; }
 		/* get comment character (default is none) */
 		char get_comment() const { return comment; }
+		line_parser_params get_params() const {
+			return line_parser_params().set_base(base).set_delim(delim).set_allow_nan_inf(allow_nan_inf).set_comment(comment);
+		}
+		void reset_pos() {
+			if(last_error != T_COPIED) {
+				pos = 0;
+				col = 0;
+				last_error = T_OK;
+			}
+		}
 		
 		/* get last error code */
 		enum read_table_errors get_last_error() const { return last_error; }
@@ -349,6 +392,7 @@ struct read_table2 : public line_parser {
 		uint64_t get_line() const { return line; }
 		/* set filename (for better formatting of diagnostic messages) */
 		void set_fn_for_diag(const char* fn_) { fn = fn; }
+		const char* get_fn() const { return fn; }
 		
 		/* write formatted error message to the given stream */
 		void write_error(std::ostream& f) const;
