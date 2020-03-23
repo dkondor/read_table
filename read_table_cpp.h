@@ -365,6 +365,9 @@ struct read_table2 : public line_parser {
 		read_table2(const read_table2& r) = delete; /* disallow copying, only moving is possible */
 		/* helper function for the constructors to set default values */
 		void read_table_init(line_parser_params par);
+		
+		const char line_endings[2] = {'\n','\r'};
+		
 	public:
 		
 		/* 1. constructors -- need to give a file name or an already open input stream */
@@ -494,6 +497,10 @@ bool read_table2::read_line(bool skip) {
 	}
 	col = 0; /* reset the counter for columns */
 	last_error = T_OK;
+	
+	/* check line end characters */
+	if(buf.size()) for(char c : line_endings) if(buf.back() == c) { buf.pop_back(); break; }
+	
 	return true;
 }
 

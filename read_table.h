@@ -83,8 +83,8 @@ f.close(); // close file separately -- r should not be used after this point
 
  */
 
-#ifndef _READ_TABLE_H
-#define _READ_TABLE_H
+#ifndef READ_TABLE_H
+#define READ_TABLE_H
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -95,12 +95,14 @@ f.close(); // close file separately -- r should not be used after this point
 
 #ifdef __cplusplus
 #include <cmath>
+using std::isnan;
+using std::isinf; /*
 static inline bool _isnan(double x) { return std::isnan(x); }
-static inline bool _isinf(double x) { return std::isinf(x); }
+static inline bool _isinf(double x) { return std::isinf(x); } */
 #else
 #include <math.h>
-static inline int _isnan(double x) { return isnan(x); }
-static inline int _isinf(double x) { return isinf(x); }
+/* static inline int _isnan(double x) { return isnan(x); }
+static inline int _isinf(double x) { return isinf(x); } */
 #endif
 
 
@@ -567,7 +569,7 @@ static int read_table_double(read_table* r, double* d) {
 	/* advance position after the number, check if there is proper field separator */
 	if(read_table_post_check(r,c2)) return 1;
 	if( (r->flags & READ_TABLE_ALLOW_NAN_INF) == 0) {
-		if(_isnan(*d) || _isinf(*d)) {
+		if(isnan(*d) || isinf(*d)) {
 			r->last_error = T_NAN;
 			return 1;
 		}
@@ -580,7 +582,7 @@ static int read_table_double_limits(read_table* r, double* d, double min, double
 	char* c2;
 	*d = strtod(r->buf + r->pos, &c2);
 	if(read_table_post_check(r,c2)) return 1;
-	if(_isnan(*d)) {
+	if(isnan(*d)) {
 		r->last_error = T_NAN;
 		return 1;
 	}
