@@ -77,9 +77,6 @@ if(r.get_last_error() != T_EOF) { // handle error
 #endif
 
 #include <cmath>
-static inline bool _isnan(double x) { return std::isnan(x); }
-static inline bool _isinf(double x) { return std::isinf(x); }
-
 
 /* possible error codes */
 enum read_table_errors {T_OK = 0, T_EOF = 1, T_EOL, T_MISSING, T_FORMAT,
@@ -746,7 +743,7 @@ bool line_parser::read_uint32_limits(uint32_t& i, uint32_t min, uint32_t max, bo
 	else {
 		unsigned long res = strtoul(buf.c_str() + pos, &c2, base);
 		/* check that result fits in bounds -- long might be 64-bit */
-		if(res > (unsigned long)max || res < (unsigned int)min) {
+		if(res > (unsigned long)max || res < (unsigned long)min) {
 			last_error = T_OVERFLOW;
 			if(res > (unsigned long)max) i = max;
 			if(res < (unsigned long)min) i = min;
@@ -795,10 +792,10 @@ bool line_parser::read_uint64_limits(uint64_t& i, uint64_t min, uint64_t max, bo
 		}
 		else {
 			res2 = strtoull(buf.c_str() + pos, &c2, base);
-			if(res2 > (unsigned long long)max || res < (unsigned long long)min) {
+			if(res2 > (unsigned long long)max || res2 < (unsigned long long)min) {
 				last_error = T_OVERFLOW;
-				if(res > (unsigned long long)max) i = max;
-				if(res < (unsigned long long)min) i = min;
+				if(res2 > (unsigned long long)max) i = max;
+				if(res2 < (unsigned long long)min) i = min;
 				ret = false;
 			}
 			else i = res2; /* store potential result */
@@ -844,7 +841,7 @@ bool line_parser::read_double(double& d, bool advance_pos) {
 	/* advance position after the number, check if there is proper field separator */
 	bool ret = read_table_post_check(c2);
 	if(ret && allow_nan_inf == false) {
-		if(_isnan(d) || _isinf(d)) {
+		if(std::isnan(d) || std::isinf(d)) {
 			last_error = T_NAN;
 			ret = false;
 		}
@@ -859,7 +856,7 @@ bool line_parser::read_double_limits(double& d, double min, double max, bool adv
 	char* c2;
 	d = strtod(buf.c_str() + pos, &c2);
 	bool ret = read_table_post_check(c2);
-	if(_isnan(d)) {
+	if(std::isnan(d)) {
 		last_error = T_NAN;
 		ret = false;
 	}
