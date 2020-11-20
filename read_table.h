@@ -668,6 +668,7 @@ static const char* read_table_get_line_str(const read_table* r) {
 
 #include <utility>
 #include <string>
+#include <sstream>
 
 
 template<class T>
@@ -948,7 +949,8 @@ struct read_table2 : public read_table {
 		size_t get_pos() const { return pos; }
 		size_t get_col() const { return col; }
 		/* set filename (for better formatting of diagnostic messages) */
-		void set_fn(const char* fn_) { fn = fn; }
+		void set_fn(const char* fn_) { fn = fn_; }
+		const char* get_fn() const { return fn; }
 		/* get current line string */
 		const char* get_line_str() const { return read_table_get_line_str(this); }
 		
@@ -956,6 +958,17 @@ struct read_table2 : public read_table {
 		void write_error(FILE* f) const { read_table_write_error(this,f); }
 		
 		static const read_table_skip_t* skip() { return &_read_table_skip1; }
+		
+		/* create a string error message that can be thrown as an exception */
+		std::string exception_string(std::string&& base_message = "") {
+			std::ostringstream strs(std::move(base_message), std::ios_base::ate);
+			strs << "read_table, ";
+			if(fn) strs << "file " << fn << ", ";
+			else strs << "input ";
+			strs << "line " << line << ", position " << pos << " / column " << col << ": ";
+			strs << get_error_desc(last_error) << '\n';
+			return strs.str();
+		}
 };
 
 #endif /* __cplusplus */
