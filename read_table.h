@@ -246,7 +246,8 @@ static int read_table_line_skip(read_table* r, int skip) {
 		r->pos = 0;
 		if(skip) {
 			for(; r->pos < r->line_len; r->pos++)
-				if( ! (r->buf[r->pos] == ' ' || r->buf[r->pos] == '\t') ) break;
+				if( ! (r->buf[r->pos] == ' ' || r->buf[r->pos] == '\t' 
+					|| r->buf[r->pos] == '\r' || r->buf[r->pos] == '\n') ) break;
 			if(r->comment) if(r->buf[r->pos] == r->comment) continue; /* check for comment character first */
 			if(r->pos < r->line_len) break; /* there is some data in the line */
 		}
@@ -878,8 +879,7 @@ struct read_table2 : public read_table {
 		}
 		/* read next line into the internal buffer */
 		bool read_line(bool skip = true) {
-			if(skip) return (read_table_line_skip(this,1)==0);
-			else return (read_table_line_skip(this,0)==0);
+			return (read_table_line_skip(this,skip) == 0);
 		}
 		/* try to parse one value from the currently read line
 		 * T can be 16, 32 or 64 bit signed or unsigned int or double */
