@@ -662,6 +662,17 @@ static const char* read_table_get_line_str(const read_table* r) {
 	return 0;
 }
 
+/* reset the position to the beginning of the current line */
+static void read_table_reset_pos(read_table* r) {
+	if(r) {
+		if( ! (r->last_error == T_COPIED || r->last_error == T_ERROR_FOPEN ||
+				r->last_error == T_READ_ERROR || r->last_error == T_EOF) ) {
+			r->pos = 0;
+			r->col = 0;
+			r->last_error = T_OK;
+		}
+	}
+}
 
 
 /* C++ object oriented interface, templated functions */
@@ -939,6 +950,9 @@ struct read_table2 : public read_table {
 		void set_comment(char comment_) { comment = comment_; }
 		/* get comment character (default is none) */
 		char get_comment() const { return comment; }
+		
+		/* reset the current position to the beginning of the line */
+		void reset_pos() { read_table_reset_pos(this); }
 		
 		/* get last error code */
 		enum read_table_errors get_last_error() const { return last_error; }
