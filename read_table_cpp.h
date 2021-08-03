@@ -668,17 +668,17 @@ bool line_parser::read_int32_limits(int32_t& i, int32_t min, int32_t max, bool a
 	bool ret;
 	char* c2;
 	long res = strtol(buf.c_str() + pos, &c2, base);
-	/* check that result fits in the given range -- note: long might be 64-bit */
-	if(res > (long)max || res < (long)min) {
-		last_error = T_OVERFLOW;
-		if(res > (long)max) i = max;
-		if(res < (long)min) i = min;
-		ret = false;
-	}
-	else {
-		i = res; /* store potential result -- at this point, it is ensured that this does not involve overflow */
-		/* advance position after the number, check if there is proper field separator */
-		ret = read_table_post_check(c2);
+	/* check for format errors first (this also advances pos) */
+	ret = read_table_post_check(c2);
+	if(ret) {
+		/* format is OK, check that result fits in bounds */
+		if(res > (long)max || res < (long)min) {
+			last_error = T_OVERFLOW;
+			if(res > (long)max) i = max;
+			if(res < (long)min) i = min;
+			ret = false;
+		}
+		else i = res; /* store potential result */
 	}
 	if(!advance_pos) pos = old_pos;
 	return ret;
@@ -695,28 +695,32 @@ bool line_parser::read_int64_limits(int64_t& i, int64_t min, int64_t max, bool a
 	/* note: try to determine if we should use long or long long */
 	long res;
 	long long res2;
-	if(LONG_MAX >= INT64_MAX && LONG_MIN <= INT64_MIN) {
-		res = strtol(buf.c_str() + pos, &c2, base);
-		if(res > (long)max || res < (long)min) {
-			last_error = T_OVERFLOW;
-			if(res > (long)max) i = max;
-			if(res < (long)min) i = min;
-			ret = false;
+	constexpr bool use_long = (LONG_MAX >= INT64_MAX && LONG_MIN <= INT64_MIN);
+	if(use_long) res = strtol(buf.c_str() + pos, &c2, base);
+	else res2 = strtoll(buf.c_str() + pos, &c2, base);
+	/* check for format errors and advance the position */
+	ret = read_table_post_check(c2);
+	if(ret) {
+		/* format is OK, check for overflows */
+		if(use_long) {
+			if(res > (long)max || res < (long)min) {
+				last_error = T_OVERFLOW;
+				if(res > (long)max) i = max;
+				if(res < (long)min) i = min;
+				ret = false;
+			}
+			else i = (int64_t)res; /* store the result */
 		}
-		else i = (int64_t)res; /* store potential result */
-	}
-	else {
-		res2 = strtoll(buf.c_str() + pos, &c2, base);
-		if(res2 > (long long)max || res2 < (long long)min) {
-			last_error = T_OVERFLOW;
-			if(res2 > (long long)max) i = max;
-			if(res2 < (long long)min) i = min;
-			ret = false;
+		else {
+			if(res2 > (long long)max || res2 < (long long)min) {
+				last_error = T_OVERFLOW;
+				if(res2 > (long long)max) i = max;
+				if(res2 < (long long)min) i = min;
+				ret = false;
+			}
+			else i = (int64_t)res2; /* store the result */
 		}
-		else i = (int64_t)res2; /* store potential result */
 	}
-	/* advance position after the number, check if there is proper field separator */
-	if(ret) ret = read_table_post_check(c2);
 	if(!advance_pos) pos = old_pos;
 	return ret;
 }
@@ -739,17 +743,17 @@ bool line_parser::read_uint32_limits(uint32_t& i, uint32_t min, uint32_t max, bo
 	}
 	else {
 		unsigned long res = strtoul(buf.c_str() + pos, &c2, base);
-		/* check that result fits in bounds -- long might be 64-bit */
-		if(res > (unsigned long)max || res < (unsigned long)min) {
-			last_error = T_OVERFLOW;
-			if(res > (unsigned long)max) i = max;
-			if(res < (unsigned long)min) i = min;
-			ret = false;
-		}
-		else {
-			i = res; /* store potential result */
-			/* advance position after the number, check if there is proper field separator */
-			ret = read_table_post_check(c2);
+		/* check for format errors first (this also advances pos) */
+		ret = read_table_post_check(c2);
+		if(ret) {
+			/* format is OK, check that result fits in bounds */
+			if(res > (unsigned long)max || res < (unsigned long)min) {
+				last_error = T_OVERFLOW;
+				if(res > (unsigned long)max) i = max;
+				if(res < (unsigned long)min) i = min;
+				ret = false;
+			}
+			else i = res; /* store potential result */
 		}
 	}
 	if(!advance_pos) pos = old_pos;
@@ -776,30 +780,33 @@ bool line_parser::read_uint64_limits(uint64_t& i, uint64_t min, uint64_t max, bo
 		/* note: try to determine if to use long or long long */
 		unsigned long res;
 		unsigned long long res2;
-		if(ULONG_MAX >= UINT64_MAX) {
-			res = strtoul(buf.c_str() + pos, &c2, base);
-			/* note: this check might be unnecessary */
-			if(res > (unsigned long)max || res < (unsigned long)min) {
-				last_error = T_OVERFLOW;
-				if(res > (unsigned long)max) i = max;
-				if(res < (unsigned long)min) i = min;
-				ret = false;
+		constexpr bool use_ulong = (ULONG_MAX >= UINT64_MAX);
+		if(use_ulong) res = strtoul(buf.c_str() + pos, &c2, base);
+		else res2 = strtoull(buf.c_str() + pos, &c2, base);
+		/* check for parse errors and advance the position */
+		ret = read_table_post_check(c2);
+		if(ret) {
+			/* format is OK, check for overflow */
+			if(use_ulong) {
+				if(res > (unsigned long)max || res < (unsigned long)min) {
+					last_error = T_OVERFLOW;
+					if(res > (unsigned long)max) i = max;
+					if(res < (unsigned long)min) i = min;
+					ret = false;
+				}
+				else i = res; /* store the result */
 			}
-			else i = res; /* store potential result */
-		}
-		else {
-			res2 = strtoull(buf.c_str() + pos, &c2, base);
-			if(res2 > (unsigned long long)max || res2 < (unsigned long long)min) {
-				last_error = T_OVERFLOW;
-				if(res2 > (unsigned long long)max) i = max;
-				if(res2 < (unsigned long long)min) i = min;
-				ret = false;
+			else {
+				if(res2 > (unsigned long long)max || res2 < (unsigned long long)min) {
+					last_error = T_OVERFLOW;
+					if(res2 > (unsigned long long)max) i = max;
+					if(res2 < (unsigned long long)min) i = min;
+					ret = false;
+				}
+				else i = res2; /* store the result */
 			}
-			else i = res2; /* store potential result */
 		}
 	}
-	/* advance position after the number, check if there is proper field separator */
-	if(ret) ret = read_table_post_check(c2);
 	if(!advance_pos) pos = old_pos;
 	return ret;
 }
@@ -853,16 +860,18 @@ bool line_parser::read_double_limits(double& d, double min, double max, bool adv
 	char* c2;
 	d = strtod(buf.c_str() + pos, &c2);
 	bool ret = read_table_post_check(c2);
-	if(std::isnan(d)) {
-		last_error = T_NAN;
-		ret = false;
-	}
-	else {
-		/* note: this will not be true if min or max is NaN, not sure if
-		 * that's a problem */
-		if( ! (d <= max && d >= min) ) {
-			last_error = T_OVERFLOW;
+	if(ret) {
+		if(std::isnan(d)) {
+			last_error = T_NAN;
 			ret = false;
+		}
+		else {
+			/* note: this will not be true if min or max is NaN, not sure if
+			 * that's a problem */
+			if( ! (d <= max && d >= min) ) {
+				last_error = T_OVERFLOW;
+				ret = false;
+			}
 		}
 	}
 	if(!advance_pos) pos = old_pos;

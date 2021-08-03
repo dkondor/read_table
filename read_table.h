@@ -404,17 +404,20 @@ static int read_table_int32_limits(read_table* r, int32_t* i, int32_t min, int32
 	errno = 0;
 	char* c2;
 	long res = strtol(r->buf + r->pos, &c2, r->base);
-	/* check that result fits in 32-bit integer -- long might be 64-bit */
-	if(res > (long)max || res < (long)min) {
-		if(res > (long)max) *i = max;
-		if(res < (long)min) *i = min;
-		r->last_error = T_OVERFLOW;
-		return 1;
-	}
-	*i = res; /* store potential result -- note: this is always well-defined
+	/* check for format errors first and advance the position */
+	int ret = read_table_post_check(r,c2);
+	if(!ret) {
+		/* check that result fits in 32-bit integer -- long might be 64-bit */
+		if(res > (long)max || res < (long)min) {
+			if(res > (long)max) *i = max;
+			if(res < (long)min) *i = min;
+			r->last_error = T_OVERFLOW;
+			return 1;
+		}
+		*i = res; /* store potential result -- note: this is always well-defined
 		(i.e. res can be represented as an int32_t at this point) */
-	/* advance position after the number, check if there is proper field separator */
-	return read_table_post_check(r,c2);
+	}
+	return ret;
 }
 /* default behavior for the previous, whole range is OK */
 static inline int read_table_int32(read_table* r, int32_t* i) {
@@ -430,29 +433,36 @@ static int read_table_int64_limits(read_table* r, int64_t* i, int64_t min, int64
 	/* note: try to determine if to use long or long long */
 	long res;
 	long long res2;
+	int ret = 0;
 	if(LONG_MAX >= INT64_MAX && LONG_MIN <= INT64_MIN) {
 		res = strtol(r->buf + r->pos, &c2, r->base);
-		/* note: this check might be unnecessary */
-		if(res > (long)max || res < (long)min) {
-			r->last_error = T_OVERFLOW;
-			if(res > (long)max) *i = max;
-			if(res < (long)min) *i = min;
-			return 1;
+		ret = read_table_post_check(r,c2); /* check for format errors */
+		if(!ret) {
+			/* check for overflow */
+			if(res > (long)max || res < (long)min) {
+				r->last_error = T_OVERFLOW;
+				if(res > (long)max) *i = max;
+				if(res < (long)min) *i = min;
+				return 1;
+			}
+			*i = res; /* store the result */
 		}
-		*i = res; /* store potential result */
 	}
 	else {
 		res2 = strtoll(r->buf + r->pos, &c2, r->base);
-		if(res2 > (long long)max || res2 < (long long)min) {
-			r->last_error = T_OVERFLOW;
-			if(res2 > (long long)max) *i = max;
-			if(res2 < (long long)min) *i = min;
-			return 1;
+		ret = read_table_post_check(r,c2); /* check for format errors */
+		if(!ret) {
+			/* check for overflow */
+			if(res2 > (long long)max || res2 < (long long)min) {
+				r->last_error = T_OVERFLOW;
+				if(res2 > (long long)max) *i = max;
+				if(res2 < (long long)min) *i = min;
+				return 1;
+			}
+			*i = res2; /* store the result */
 		}
-		*i = res2; /* store potential result */
 	}
-	/* advance position after the number, check if there is proper field separator */
-	return read_table_post_check(r,c2);
+	return ret;
 }
 static inline int read_table_int64(read_table* r, int64_t *i) {
 	return read_table_int64_limits(r,i,INT64_MIN,INT64_MAX);
@@ -473,16 +483,19 @@ static int read_table_uint32_limits(read_table* r, uint32_t* i, uint32_t min, ui
 		return 1;
 	}
 	unsigned long res = strtoul(r->buf + r->pos, &c2, r->base);
-	/* check that result fits in 32-bit integer -- long might be 64-bit */
-	if(res > (unsigned long)max || res < (unsigned long)min) {
-		r->last_error = T_OVERFLOW;
-		if(res > (unsigned long)max) *i = max;
-		if(res < (unsigned long)min) *i = min;
-		return 1;
+	/* check for format errors */
+	int ret = read_table_post_check(r,c2);
+	if(!ret) {
+		/* check for overflow */
+		if(res > (unsigned long)max || res < (unsigned long)min) {
+			r->last_error = T_OVERFLOW;
+			if(res > (unsigned long)max) *i = max;
+			if(res < (unsigned long)min) *i = min;
+			return 1;
+		}
+		*i = res; /* store the result */
 	}
-	*i = res; /* store potential result */
-	/* advance position after the number, check if there is proper field separator */
-	return read_table_post_check(r,c2);
+	return ret;
 }
 static inline int read_table_uint32(read_table* r, uint32_t* i) {
 	return read_table_uint32_limits(r,i,0,UINT32_MAX);
@@ -505,29 +518,36 @@ static int read_table_uint64_limits(read_table* r, uint64_t* i, uint64_t min, ui
 	/* note: try to determine if to use long or long long */
 	unsigned long res;
 	unsigned long long res2;
+	int ret = 0;
 	if(ULONG_MAX >= UINT64_MAX) {
 		res = strtoul(r->buf + r->pos, &c2, r->base);
-		/* note: this check might be unnecessary */
-		if(res > (unsigned long)max || res < (unsigned long)min) {
-			r->last_error = T_OVERFLOW;
-			if(res > (unsigned long)max) *i = max;
-			if(res < (unsigned long)min) *i = min;
-			return 1;
+		ret = read_table_post_check(r,c2); /* check for format errors */
+		if(!ret) {
+			/* check for overflow */
+			if(res > (unsigned long)max || res < (unsigned long)min) {
+				r->last_error = T_OVERFLOW;
+				if(res > (unsigned long)max) *i = max;
+				if(res < (unsigned long)min) *i = min;
+				return 1;
+			}
+			*i = res; /* store potential result */
 		}
-		*i = res; /* store potential result */
 	}
 	else {
 		res2 = strtoull(r->buf + r->pos, &c2, r->base);
-		if(res2 > (unsigned long long)max || res2 < (unsigned long long)min) {
-			r->last_error = T_OVERFLOW;
-			if(res2 > (unsigned long long)max) *i = max;
-			if(res2 < (unsigned long long)min) *i = min;
-			return 1;
+		ret = read_table_post_check(r,c2); /* check for format errors */
+		if(!ret) {
+			/* check for overflow */
+			if(res2 > (unsigned long long)max || res2 < (unsigned long long)min) {
+				r->last_error = T_OVERFLOW;
+				if(res2 > (unsigned long long)max) *i = max;
+				if(res2 < (unsigned long long)min) *i = min;
+				return 1;
+			}
+			*i = res2; /* store the result */
 		}
-		*i = res2; /* store potential result */
 	}
-	/* advance position after the number, check if there is proper field separator */
-	return read_table_post_check(r,c2);
+	return ret;
 }
 static inline int read_table_uint64(read_table* r, uint64_t* i) {
 	return read_table_uint64_limits(r,i,0,UINT64_MAX);
