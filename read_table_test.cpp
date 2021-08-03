@@ -129,7 +129,8 @@ int main(int argc, char **argv)
 	if(delim) rt.set_delim(delim);
 	if(comment) rt.set_comment(comment);
 	func[testcase](std::move(rt));
-	
+	if(rt.get_last_error() != T_EOF) rt.write_error(err_stream);
+
 	return 0;
 }
 

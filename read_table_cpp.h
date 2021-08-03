@@ -66,10 +66,13 @@ if(r.get_last_error() != T_EOF) { // handle error
 #include <ctype.h>
 #include <errno.h>
 #include <utility>
+#include <type_traits>
+#include <memory>
 #include <iostream>
 #include <istream>
 #include <ostream>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <string.h>
 #if __cplusplus >= 201703L
@@ -192,41 +195,39 @@ struct line_parser_params {
 struct line_parser {
 	protected:
 		std::string buf; /* buffer to hold the current line */
-		size_t pos; /* current position in line */
-		size_t col; /* current field (column) */
+		size_t pos = 0; /* current position in line */
+		size_t col = 0; /* current field (column) */
 		int base; /* base for integer conversions */
-		enum read_table_errors last_error; /* error code of the last operation */
+		enum read_table_errors last_error = T_OK; /* error code of the last operation */
 		char delim; /* delimiter to use; 0 means any blank (space or tab) note: cannot be newline */
 		char comment; /* character to indicate comments; 0 means none */
 		bool allow_nan_inf; /* further flags: whether reading a NaN or INF for double values is considered and error */
 		
-		void line_parser_init(line_parser_params par) {
-			pos = 0;
-			col = 0;
+		void line_parser_init(const line_parser_params& par) {
 			base = par.base;
 			delim = par.delim;
 			comment = par.comment;
 			allow_nan_inf = par.allow_nan_inf;
-			last_error = T_OK;
 		}
 		
 	public:
 		/* 1. constructors, either with an empty string, or anything that can be copied into a string */
-		explicit line_parser(line_parser_params par = line_parser_params()) {
+		explicit line_parser(const line_parser_params& par = line_parser_params()) {
 			line_parser_init(par);
 		}
 		template<class... Args>
-		explicit line_parser(line_parser_params par, Args&&... args):buf(std::forward<Args>(args)...) {
+		explicit line_parser(const line_parser_params& par, Args&&... args):buf(std::forward<Args>(args)...) {
 			line_parser_init(par);
 		}
-		template<class... Args>
-		explicit line_parser(Args&&... args):buf(std::forward<Args>(args)...) {
+		template<class T, class... Args, std::enable_if_t<!std::is_base_of<line_parser, T>::value>* = nullptr>
+		explicit line_parser(T&& t, Args&&... args):buf(std::forward<T>(t), std::forward<Args>(args)...) {
 			line_parser_init(line_parser_params());
 		}
 		
-		/* move constructor and move assignment -- ensure the string is moved
-		line_parser(line_parser&& lp) {
-			buf = std::move(lp.buf);
+		line_parser(const line_parser& lp) = default;
+		
+		/* move constructor and move assignment -- ensure the string is moved */
+		line_parser(line_parser&& lp) : buf(std::move(lp.buf)) {
 			pos = lp.pos;
 			col = lp.col;
 			base = lp.base;
@@ -248,7 +249,8 @@ struct line_parser {
 			lp.last_error = T_COPIED;
 			lp.pos = 0;
 			lp.col = 0;
-		}*/
+			return *this;
+		}
 		
 		/* 2. set (copy) the internal string */
 		template<class... Args>
@@ -293,11 +295,13 @@ struct line_parser {
 			return line_parser_params().set_base(base).set_delim(delim).set_allow_nan_inf(allow_nan_inf).set_comment(comment);
 		}
 		void reset_pos() {
-			if(last_error != T_COPIED) {
-				pos = 0;
-				col = 0;
-				last_error = T_OK;
-			}
+			if(last_error == T_COPIED || last_error == T_EOF ||
+				last_error == T_ERROR_FOPEN || last_error == T_READ_ERROR)
+					return; /* these errors cannot be recovered, and should not be reset */
+			
+			pos = 0;
+			col = 0;
+			last_error = T_OK;
 		}
 		
 		/* get last error code */
@@ -353,15 +357,13 @@ struct line_parser {
 /* main class containing main parameters for processing text */
 struct read_table2 : public line_parser {
 	protected:
-		std::istream* is; /* input stream -- note: only a pointer is stored, the caller either supplies an input stream or a
+		std::istream* is = nullptr; /* input stream -- note: only a pointer is stored, the caller either supplies an input stream or a
 			file name; in the former case, the original object should not go out of scope while this struct is used */
-		std::ifstream* fs; /* file stream if it is opened by us */
-		const char* fn; /* file name, stored optionally for error output */
-		uint64_t line; /* current line (count starts from 1) */
+		std::unique_ptr<std::ifstream> fs; /* file stream if it is opened by us */
+		const char* fn = nullptr; /* file name, stored optionally for error output (note: not owned by this class, caller should not free the supplied value) */
+		uint64_t line = 0; /* current line (count starts from 1) */
 		read_table2() = delete; /* user should supply either an input stream or a filename to use */
 		read_table2(const read_table2& r) = delete; /* disallow copying, only moving is possible */
-		/* helper function for the constructors to set default values */
-		void read_table_init(line_parser_params par);
 		
 		const char line_endings[2] = {'\n','\r'};
 		
@@ -371,22 +373,21 @@ struct read_table2 : public line_parser {
 		
 		/* constructor taking a file name; the given file is opened for reading
 		 * and closed later in the destructor */
-		explicit read_table2(const char* fn_, line_parser_params par = line_parser_params());
+		explicit read_table2(const char* fn_, const line_parser_params& par = line_parser_params());
 		/* constructor taking a reference to a stream -- it is NOT copied, i.e.
 		 * the original instance of the stream need to be kept by the caller;
 		 * also, the stream is not closed in the destructor in this case */
-		explicit read_table2(std::istream& is_, line_parser_params par = line_parser_params());
+		explicit read_table2(std::istream& is_, const line_parser_params& par = line_parser_params());
 		/* constructor either opening a file or taking the stream as fallback
 		 * when fn_ is NULL */
-		read_table2(const char* fn_, std::istream& is_, line_parser_params par = line_parser_params());
+		read_table2(const char* fn_, std::istream& is_, const line_parser_params& par = line_parser_params());
 		read_table2(read_table2&& r);
-		~read_table2();
 		
+		read_table2& operator = (read_table2&& r);
 		
 		/* 2. read one line into the internal buffer
 		 * 	the 'skip' parameter controls whether empty lines are skipped */
 		bool read_line(bool skip = true);
-		
 		
 		/* get current position in the file */
 		uint64_t get_line() const { return line; }
@@ -396,73 +397,67 @@ struct read_table2 : public line_parser {
 		
 		/* write formatted error message to the given stream */
 		void write_error(std::ostream& f) const;
+		void write_error(FILE* f) const;
+		
+		/* create a string error message that can be thrown as an exception */
+		std::string exception_string(std::string&& base_message = "") {
+			std::ostringstream strs(std::move(base_message), std::ios_base::ate);
+			strs << "read_table, ";
+			if(fn) strs << "file " << fn << ", ";
+			else strs << "input ";
+			strs << "line " << line << ", position " << pos << " / column " << col << ": ";
+			strs << get_error_desc(last_error) << '\n';
+			return strs.str();
+		}
 };
 
 
 
-
-/* constructor -- allocate new read_table2 struct, fill in the necessary fields */
-void read_table2::read_table_init(line_parser_params par) {
-	line_parser_init(par);
-	line = 0;
-	fn = 0;
-}
-
-read_table2::read_table2(const char* fn_, line_parser_params par) {
-	fs = new std::ifstream(fn_);
+read_table2::read_table2(const char* fn_, const line_parser_params& par) : line_parser(par) {
+	fs = std::unique_ptr<std::ifstream>(new std::ifstream(fn_));
 	if( !fs || !(fs->is_open()) || fs->fail() ) last_error = T_ERROR_FOPEN;
 	else fs->exceptions(std::ios_base::goodbit); /* clear exception mask -- no exceptions thrown, error checking done separately */
-	is = fs;
-	read_table_init(par);
+	is = fs.get();
 	fn = fn_;
 }
 
-read_table2::read_table2(const char* fn_, std::istream& is_, line_parser_params par) {
+read_table2::read_table2(const char* fn_, std::istream& is_, const line_parser_params& par) : line_parser(par) {
+	line_parser_init(par);
 	if(fn_) {
-		fs = new std::ifstream(fn_);
-			if( !fs || !(fs->is_open()) || fs->fail() ) last_error = T_ERROR_FOPEN;
+		fs = std::unique_ptr<std::ifstream>(new std::ifstream(fn_));
+		if( !fs || !(fs->is_open()) || fs->fail() ) last_error = T_ERROR_FOPEN;
 		else fs->exceptions(std::ios_base::goodbit); /* clear exception mask -- no exceptions thrown, error checking done separately */
-		is = fs;
+		is = fs.get();
 	}
 	else {
-		fs = 0;
 		is = &is_;
 		is->exceptions(std::ios_base::goodbit); /* clear exception mask -- no exceptions thrown, error checking done separately */
 	}
-	read_table_init(par);
 	fn = fn_;
 }
 
-read_table2::read_table2(std::istream& is_, line_parser_params par) {
-	is = &is_;
-	fs = 0;
+read_table2::read_table2(std::istream& is_, const line_parser_params& par) : line_parser(par), is(&is_) {
 	is->exceptions(std::ios_base::goodbit); /* clear exception mask -- no exceptions thrown, error checking done separately */
-	read_table_init(par);
 }
 
-/* destructor -- closes the input stream only if it was opened in the 
- * constructor (i.e. the constructor was called with a filename */
-read_table2::~read_table2() {
-	if(fs) delete fs;
-}
 
 /* move constructor -- moves the stream to the new instance
  * the old instance is invalidated */
-read_table2::read_table2(read_table2&& r):line_parser(std::move(r.buf)) {
-	/* copy all elements */
-	line = r.line;
-	pos = r.pos;
-	col = r.col;
-	last_error = r.last_error;
-	delim = r.delim;
-	comment = r.comment;
-	fn = r.fn;
-	base = r.base;
-	allow_nan_inf = r.allow_nan_inf;
-	fs = r.fs;
+read_table2::read_table2(read_table2&& r) : line_parser(std::move(r)), 
+		is(r.is), fs(std::move(r.fs)), fn(r.fn), line(r.line) {
+	/* note: line_parser base class' move constructor will set r.last_error == T_COPIED,
+	 * so r will not be usable from this point on */
+	r.is = nullptr;
+}
+
+read_table2& read_table2::operator = (read_table2&& r) {
+	line_parser::operator =(std::move(r)); /* move the main part, also setting r.last_error == T_COPIED */ 
 	is = r.is;
-	r.last_error = T_COPIED;
-	r.fs = 0;
+	fs = std::move(r.fs);
+	fn = r.fn;
+	line = r.line;
+	r.is = nullptr;
+	return *this;
 }
 
 /* read a new line (discarding any remaining data in the current line)
@@ -505,7 +500,7 @@ bool read_table2::read_line(bool skip) {
 
 /* checks to be performed before trying to convert a field */
 bool line_parser::read_table_pre_check(bool advance_pos) {
-	if(last_error == T_EOF || last_error == T_EOL ||
+	if(last_error == T_EOF || last_error == T_EOL || last_error == T_COPIED ||
 		last_error == T_READ_ERROR || last_error == T_ERROR_FOPEN) return false;
 	/* 1. skip any blanks */
 	size_t old_pos = pos;
@@ -883,6 +878,15 @@ void read_table2::write_error(std::ostream& f) const {
 	else f<<"input ";
 	f<<"line "<<line<<", position "<<pos<<" / column "<<col<<": "<<get_error_desc(last_error)<<"\n";
 }
+
+void read_table2::write_error(FILE* f) const {
+	if(!f) return;
+	fprintf(f,"read_table, ");
+	if(fn) fprintf(f,"file %s, ",fn);
+	else fprintf(f,"input ");
+	fprintf(f,"line %lu, position %lu / column %lu: %s\n",line,pos,col,get_error_desc(last_error));
+}
+
 
 
 
