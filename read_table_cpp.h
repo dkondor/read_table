@@ -225,6 +225,7 @@ struct line_parser {
 		}
 		
 		line_parser(const line_parser& lp) = default;
+		line_parser& operator = (const line_parser& lp) = default;
 		
 		/* move constructor and move assignment -- ensure the string is moved */
 		line_parser(line_parser&& lp) : buf(std::move(lp.buf)) {
@@ -239,6 +240,7 @@ struct line_parser {
 			lp.col = 0;
 		}
 		line_parser& operator = (line_parser&& lp) {
+			if(this == &lp) return *this; /* protect self-assignment */
 			buf = std::move(lp.buf);
 			pos = lp.pos;
 			col = lp.col;
@@ -451,6 +453,7 @@ read_table2::read_table2(read_table2&& r) : line_parser(std::move(r)),
 }
 
 read_table2& read_table2::operator = (read_table2&& r) {
+	if(this == &r) return *this;
 	line_parser::operator =(std::move(r)); /* move the main part, also setting r.last_error == T_COPIED */ 
 	is = r.is;
 	fs = std::move(r.fs);
