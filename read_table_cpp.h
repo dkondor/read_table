@@ -277,6 +277,20 @@ struct line_parser {
 		template<class T> bool read_next(T& val, bool advance_pos = true);
 		/* overload of the previous for reading values with bounds */
 		template<class T> bool read_next(read_bounds_t<T> val, bool advance_pos = true);
+		/* overload for reading std::pairs */
+		template<class U, class V> bool read_next(std::pair<U, V>& p, bool advance_pos = true) {
+			U u;
+			V v;
+			size_t old_pos = pos;
+			bool ret = read_next(u) && read_next(v);
+			if(ret) {
+				p.first = u;
+				p.second = v;
+			}
+			if(!advance_pos) pos = old_pos;
+			return ret;
+		}
+
 		/* try to parse whole line (read previously with read_line()),
 		 * into the given list of parameters */
 		bool read() { return true; }
