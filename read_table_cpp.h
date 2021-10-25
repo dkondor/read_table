@@ -13,7 +13,7 @@
  * 
  * note that this requires C++11
  * 
- * Copyright 2018 Daniel Kondor <kondor.dani@gmail.com>
+ * Copyright 2018-2021 Daniel Kondor <kondor.dani@gmail.com>
  * 
  * * Redistributions of source code must retain the above copyright
  *   notice, this list of conditions and the following disclaimer.
@@ -981,6 +981,75 @@ bool line_parser::read(first&& val, rest&&... vals) {
 	if(!read_next(val,true)) return false;
 	return read(vals...);
 }
+
+
+
+
+/* Wrapper for creating an stdiostream from an arbitrary function
+ * that reads data -- this can be used to read from C FILE* objects
+ * in a portable way.
+ * The template parameter reader should be a callable object that reads
+ * data to the given buffer, up to the given size and returns the number
+ * of bytes read. I.e. given an object
+ * 	reader rd;
+ * it should be callable as if it was a function defined with the
+ * following prototype:
+ *  size_t rd(char* ptr, size_t nmemb);
+ * where ptr is a buffer to read to and nmemb is the size of this buffer
+ * in bytes.
+ * The return value should be the size of data read (in bytes) or 0 in
+ * case there is no more data to be read or an error occured.
+ * Note: this does not distinguish between an error or the end of the
+ * data source. A later extension should allow for this.
+ * 
+ * Typical usage:
+rtiobuf<...> buf(...); // supply template parameter and constructor arguments
+std::istream is(&buf);
+read_table2 rt(is);
+ *  */
+template<class reader>
+class rtiobuf : public std::streambuf {
+	protected:
+		constexpr static size_t buffer_size = 7680UL;
+		reader rd;
+		char buffer[buffer_size];
+	public:
+		explicit rtiobuf(reader&& rd_) : rd(std::move(rd_)) { }
+		explicit rtiobuf(const reader& rd_) : rd(rd_) { }
+		template<class... Args>
+		explicit rtiobuf(Args&&... args) : rd(std::forward<Args>(args)...) { }
+		
+		int underflow() override {
+			size_t size = rd(buffer, buffer_size);
+			setg(buffer, buffer, buffer + size);
+			if(gptr() == egptr()) return traits_type::eof();
+			else return traits_type::to_int_type(*(gptr()));
+		}
+};
+
+/* helper to create a reader e.g. from a lambda function */
+template<class reader>
+rtiobuf<reader> make_rtiobuf(reader&& rd) { return rtiobuf<reader>(std::forward<reader>(rd)); }
+
+/* Helper class to supply a FILE* object to the above.
+ * This can be useful e.g. in the following situations:
+ *   -- using popen()
+ *   -- ensuring that the O_CLOEXEC flag is set on the file
+ */
+class stdio_reader {
+	protected:
+		FILE* f; /* file to read from */
+		bool close_file; /* whether to close the file when this object is destructed, i.e. whether the file is owned by this instance */
+	public:
+		explicit stdio_reader(FILE* f_, bool close = false) : f(f_), close_file(close) { }
+		size_t operator ()(char* buf, size_t size) { return f ? fread(buf, 1UL, size, f) : 0UL; }
+		~stdio_reader() {
+			if(f && close_file) fclose(f);
+			f = nullptr;
+		}
+};
+
+
 
 
 #endif /* _READ_TABLE_H */
