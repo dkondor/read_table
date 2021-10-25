@@ -219,7 +219,7 @@ struct line_parser {
 		explicit line_parser(const line_parser_params& par, Args&&... args):buf(std::forward<Args>(args)...) {
 			line_parser_init(par);
 		}
-		template<class T, class... Args, std::enable_if_t<!std::is_base_of<line_parser, T>::value>* = nullptr>
+		template<class T, class... Args, typename std::enable_if<!std::is_base_of<line_parser, T>::value>::type* = nullptr>
 		explicit line_parser(T&& t, Args&&... args):buf(std::forward<T>(t), std::forward<Args>(args)...) {
 			line_parser_init(line_parser_params());
 		}
